@@ -251,15 +251,15 @@ function gerarHTML(paginas, totalProdutos) {
   .cabecalho { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #00334d; padding-bottom:8px; margin-bottom:14px; }
   .cabecalho-marca { font-weight:800; letter-spacing:3px; color:#00334d; font-size:14px; }
   .cabecalho-pagina { font-weight:700; color:#00a859; font-size:13px; }
-  .grade { flex:1; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(4, 1fr); gap:16px 18px; }
-  .produto { display:flex; gap:14px; border:1px solid #e6ecf0; border-radius:12px; padding:12px; align-items:center; height:100%; box-shadow:0 2px 8px rgba(0,51,77,.05); }
-  .produto-img { width:100px; height:100px; flex:0 0 100px; display:flex; align-items:center; justify-content:center; background:#f8fafb; border:1px solid #e6ecf0; border-radius:10px; overflow:hidden; }
+  .grade { flex:1; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(4, 1fr); gap:14px; }
+  .produto { display:flex; flex-direction:column; align-items:center; text-align:center; gap:6px; border:1px solid #e6ecf0; border-radius:12px; padding:12px; height:100%; box-shadow:0 2px 8px rgba(0,51,77,.05); }
+  .produto-img { width:65%; max-width:130px; height:48%; min-height:80px; display:flex; align-items:center; justify-content:center; background:#f8fafb; border:1px solid #e6ecf0; border-radius:10px; overflow:hidden; }
   .produto-img img { max-width:100%; max-height:100%; object-fit:contain; }
-  .produto-info { flex:1; min-width:0; }
-  .produto-marca { color:#00a859; font-weight:800; font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
-  .produto-nome { font-weight:700; font-size:13px; line-height:1.3; margin:4px 0; color:#0f2a3d; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-  .produto-cod { font-size:10.5px; color:#6b7c85; }
-  .produto-preco { display:inline-block; margin-top:6px; padding:3px 11px; border-radius:999px; background:rgba(0,168,89,.12); color:#00753d; font-weight:800; font-size:13.5px; }
+  .produto-info { min-width:0; display:flex; flex-direction:column; align-items:center; }
+  .produto-marca { color:#00a859; font-weight:800; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px; }
+  .produto-nome { font-weight:700; font-size:12.5px; line-height:1.25; margin:4px 0; color:#0f2a3d; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .produto-cod { font-size:9.5px; color:#6b7c85; }
+  .produto-preco { display:inline-block; margin-top:5px; padding:3px 12px; border-radius:999px; background:rgba(0,168,89,.12); color:#00753d; font-weight:800; font-size:13px; }
   .banner { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background: linear-gradient(160deg, #eef7f2, #dff2e7); border-radius:16px; }
   .banner h2 { color:#00334d; font-size:26px; margin:0 0 8px; }
   .banner p { color:#37525f; font-size:14px; margin:0; }
