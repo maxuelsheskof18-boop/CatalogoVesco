@@ -9,7 +9,7 @@
     "dev": "node server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18 <26"
   },
   "dependencies": {
     "express": "^4.19.2",

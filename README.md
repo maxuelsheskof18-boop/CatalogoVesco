@@ -63,6 +63,22 @@ dessa variável, adicione manualmente em **Environment**, no Render:
 - Nome: `PUPPETEER_CACHE_DIR`
 - Valor: `/opt/render/project/.cache/puppeteer`
 
+**Se der um erro do tipo "The browser folder exists but the executable is
+missing":** esse é um bug conhecido do Puppeteer especificamente no Node.js
+26 — o download do Chrome é feito, mas a extração dos arquivos para
+silenciosamente no meio, sem mostrar erro nenhum, e só quebra depois, quando
+o site tenta usar o Chrome (mais detalhes:
+[puppeteer/puppeteer#14957](https://github.com/puppeteer/puppeteer/issues/14957)).
+A correção é fixar o Render numa versão do Node anterior à 26 (o `render.yaml`
+já vem configurado assim). Se o seu serviço já existia antes dessa variável,
+adicione manualmente em **Environment**:
+
+- Nome: `NODE_VERSION`
+- Valor: `20`
+
+Depois disso, rode outro **Manual Deploy** → **Clear build cache & deploy**
+(de novo com cache limpo, pra descartar a instalação corrompida anterior).
+
 Depois disso, rode um **Manual Deploy** → **Clear build cache & deploy**
 (importante limpar o cache do build dessa vez, pra forçar o Chrome a ser
 baixado de novo já no caminho certo).

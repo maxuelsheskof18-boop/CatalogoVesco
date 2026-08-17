@@ -12,3 +12,5 @@ services:
         sync: false
       - key: PUPPETEER_CACHE_DIR
         value: /opt/render/project/.cache/puppeteer
+      - key: NODE_VERSION
+        value: "20"
