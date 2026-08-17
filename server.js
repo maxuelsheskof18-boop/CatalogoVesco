@@ -302,10 +302,40 @@ async function gerarPdfBuffer(produtos) {
     });
     const page = await browser.newPage();
     page.on('pageerror', (err) => console.warn('Aviso: erro na página do PDF (ignorado):', err.message));
-    // networkidle0 espera as fotos (carregadas via <img src>) terminarem de
-    // baixar antes de imprimir; com catálogos grandes isso pode levar um
-    // tempo, por isso o timeout maior que o padrão.
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 120000 });
+
+    // Só espera o HTML/CSS carregar aqui (rápido, não depende de rede
+    // externa) — NÃO usamos "networkidle0" porque, com centenas de fotos
+    // (URLs externas) carregando ao mesmo tempo, basta UMA foto lenta ou
+    // travada pra isso nunca "ficar ocioso" e estourar o timeout inteiro
+    // (foi exatamente o que causou o "Navigation timeout exceeded" com o
+    // catálogo completo).
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Em vez disso, esperamos as fotos em paralelo com um limite de tempo
+    // PRÓPRIO POR FOTO: cada uma tem até 8s pra carregar; a que não
+    // conseguir simplesmente fica pra trás (o "onerror" no HTML já troca
+    // pela imagem "sem imagem") sem travar as outras nem o restante da
+    // geração. Isso deixa o tempo total previsível mesmo com catálogos
+    // grandes, em vez de crescer junto com a quantidade de produtos.
+    await page.evaluate(() => {
+      const imagens = Array.from(document.images);
+      return Promise.all(
+        imagens.map((img) => {
+          if (img.complete) return Promise.resolve();
+          return new Promise((resolve) => {
+            const finalizar = () => {
+              img.removeEventListener('load', finalizar);
+              img.removeEventListener('error', finalizar);
+              resolve();
+            };
+            img.addEventListener('load', finalizar);
+            img.addEventListener('error', finalizar);
+            setTimeout(finalizar, 8000);
+          });
+        })
+      );
+    });
+
     return await page.pdf({ format: 'A4', printBackground: true });
   } finally {
     if (browser) {
