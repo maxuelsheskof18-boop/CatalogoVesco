@@ -32,7 +32,7 @@ const HEYZINE_CLIENT_ID =
   '0feeb11c5431caa2';
 const TMP_DIR = path.join(__dirname, 'public', 'tmp');
 
-const ITEMS_PER_PAGE = 6;
+const ITEMS_PER_PAGE = 8;
 const BANNER_EVERY_PAGES = 4;
 
 // placeholder "sem imagem" em SVG (não depende de arquivo externo)

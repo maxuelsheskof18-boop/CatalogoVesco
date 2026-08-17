@@ -114,8 +114,8 @@ main {
 
 .livro-stage {
   position: relative;
-  width: min(600px, 92vw);
-  height: min(820px, 86vh);
+  width: min(760px, 95vw);
+  height: min(980px, 92vh);
   perspective: 1800px;
 }
 
