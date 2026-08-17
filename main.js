@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const ITEMS_PER_PAGE = 8;
+  const ITEMS_PER_PAGE = 10;
   const BANNER_EVERY_PAGES = 4;
   const MOBILE_BREAKPOINT = 780;
 
