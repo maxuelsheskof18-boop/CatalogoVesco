@@ -32,7 +32,7 @@ const HEYZINE_CLIENT_ID =
   '0feeb11c5431caa2';
 const TMP_DIR = path.join(__dirname, 'public', 'tmp');
 
-const ITEMS_PER_PAGE = 8;
+const ITEMS_PER_PAGE = 10;
 const BANNER_EVERY_PAGES = 4;
 
 // Limite de segurança: gerar o catálogo inteiro (centenas de produtos, cada
@@ -91,14 +91,71 @@ async function buscarProdutos() {
   return produtos;
 }
 
+// ---------------------------------------------------------------
+// Categorização automática: em vez de depender da coluna "categoria"
+// da planilha (que vem vazia ou inconsistente boa parte das vezes), a
+// categoria de cada produto é detectada a partir de palavras-chave no
+// próprio nome — assim fica simples de ajustar (só mexer na lista
+// abaixo) e sempre consistente entre o site, o PDF e a revista digital
+// (os três usam esse mesmo campo "categoria", vindo do /api/produtos).
+//
+// A ordem importa: a primeira regra que bater com o nome do produto
+// "ganha", então termos mais específicos (ex.: "interfolha") vêm antes
+// de termos mais genéricos (ex.: "toalha"). Pra ajustar/adicionar uma
+// categoria nova, basta acrescentar uma linha na lista abaixo.
+const REGRAS_CATEGORIA = [
+  // Equipamentos/acessórios primeiro: um "dispenser para papel toalha"
+  // é um dispenser, não um papel toalha — por isso essa regra precisa
+  // vir antes das categorias de papel abaixo.
+  ['Dispensers e Suportes', /dispenser|suporte para|porta[- ]?papel/],
+  ['Papel Higiênico', /higien/],
+  ['Papel Toalha Interfolha', /interfolha/],
+  ['Papel Toalha Bobina', /\bbobina/],
+  ['Papel Toalha', /toalha/],
+  ['Lenços de Papel', /\blenc[oa]s? de papel\b|kleenex|folha tripla|folha dupla|lenco umedecido/],
+  ['Lençol Hospitalar', /lencol hospitalar|lencol descartavel/],
+  ['Guardanapo', /guardanapo/],
+  ['Sabonete', /sabonete|sabao liquido|sabao em barra|sabao em pedra/],
+  ['Desinfetante', /desinfetante/],
+  ['Álcool', /\balcool\b/],
+  ['Água Sanitária', /agua sanitaria|\bcloro\b|hipoclorito/],
+  ['Detergente', /detergente|sabao em po|lava roupa|lava-roupa/],
+  ['Amaciante', /amaciante/],
+  ['Sacos de Lixo', /saco.*lixo|lixo.*saco/],
+  ['Copos Descartáveis', /copo descart/],
+  ['Luvas', /\bluva/],
+  ['Máscaras e EPI', /mascara|\bepi\b|touca descartavel|protetor facial/],
+  ['Vassouras e Rodos', /vassoura|\brodo\b|pa de lixo/],
+  ['Esponjas e Buchas', /esponja|bucha/],
+  ['Panos e Flanelas', /pano de chao|pano de piso|flanela|microfibra/],
+  // "Multiuso" fica por último entre os produtos de limpeza porque
+  // costuma aparecer como adjetivo em cima de outra categoria (ex.:
+  // "esponja multiuso"), não como o tipo do produto em si.
+  ['Multiuso', /multiuso|multi uso|multi-uso/]
+];
+
+function normalizarTextoCategoria(txt) {
+  return String(txt || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function categorizarProduto(nomeProduto) {
+  const texto = normalizarTextoCategoria(nomeProduto);
+  const regra = REGRAS_CATEGORIA.find(([, regex]) => regex.test(texto));
+  return regra ? regra[0] : '';
+}
+
 function normalizarProduto(p) {
   const imagemBruta = (p.imagem || '').trim();
   const imagemValida = imagemBruta.startsWith('http') ? imagemBruta : '';
+  const nome = p.produto || '';
   return {
     codigo: p.codigo || '',
-    produto: p.produto || '',
+    produto: nome,
     marca: p.marca || '',
-    categoria: p.categoria || '',
+    categoria: categorizarProduto(nome) || p.categoria || 'Outros',
     custo: p.custo || '',
     venda: p.venda || '',
     imagem: imagemValida,
@@ -152,16 +209,32 @@ app.get('/health', (req, res) => res.send('ok'));
 // <img src>, e é o próprio Chromium (headless) que baixa e desenha cada
 // foto — do mesmo jeito que um navegador normal faria, de forma bem mais
 // leve em memória. `onerror` no HTML cobre fotos com link quebrado.
+// Frases da página de destaque que aparece entre os produtos no PDF —
+// uma diferente a cada vez que ela aparece, pra prender mais a atenção
+// de quem está folheando (a mesma lista usada no site).
+const FRASES_DESTAQUE = [
+  { titulo: 'Higiene que sua empresa pode confiar', texto: 'Produtos de alta performance para manter seu espaço impecável, todos os dias.' },
+  { titulo: 'Mais limpeza, menos preocupação', texto: 'Ótimo rendimento e performance profissional — a escolha certa pra quem quer economia sem abrir mão da qualidade.' },
+  { titulo: 'Seleção Vesco', texto: 'Os produtos mais procurados do nosso catálogo, com a qualidade que só quem entende de higiene profissional entrega.' },
+  { titulo: 'A primeira impressão começa na limpeza', texto: 'Eleve o padrão do seu espaço com produtos que unem qualidade, cuidado e performance em cada detalhe.' },
+  { titulo: 'Seu negócio limpo, sua reputação em dia', texto: 'Soluções completas em higiene pra você cuidar do que importa, com a tranquilidade de ter o produto certo em mãos.' },
+  { titulo: 'Praticidade que rende de verdade', texto: 'Produtos pensados pro dia a dia da sua operação — menos reposição, mais resultado.' },
+  { titulo: 'Feito pra quem exige o melhor', texto: 'Fornecedores de confiança, produtos testados e aprovados por quem vive a rotina da limpeza profissional.' },
+  { titulo: 'Limpeza que também é cuidado', texto: 'Cada produto Vesco carrega o compromisso de proteger pessoas e espaços com qualidade de verdade.' }
+];
+
 function montarPaginas(produtos) {
   const paginasProdutos = [];
   for (let i = 0; i < produtos.length; i += ITEMS_PER_PAGE) {
     paginasProdutos.push(produtos.slice(i, i + ITEMS_PER_PAGE));
   }
   const paginas = [];
+  let contadorDestaque = 0;
   for (let i = 0; i < paginasProdutos.length; i++) {
     paginas.push({ type: 'produtos', items: paginasProdutos[i] });
     if ((i + 1) % BANNER_EVERY_PAGES === 0 && i !== paginasProdutos.length - 1) {
-      paginas.push({ type: 'banner' });
+      paginas.push({ type: 'banner', bannerIndex: contadorDestaque });
+      contadorDestaque += 1;
     }
   }
   return paginas;
@@ -184,12 +257,13 @@ function gerarHTML(paginas, totalProdutos) {
     .map((pagina, idx) => {
       const numero = idx + 2;
       if (pagina.type === 'banner') {
+        const frase = FRASES_DESTAQUE[(pagina.bannerIndex || 0) % FRASES_DESTAQUE.length];
         return `
         <section class="pagina">
           ${cabecalho(numero)}
           <div class="banner">
-            <h2>Linha Destaque</h2>
-            <p>Produtos com qualidade e performance para o seu negócio.</p>
+            <h2>${escapeHtml(frase.titulo)}</h2>
+            <p>${escapeHtml(frase.texto)}</p>
           </div>
           ${rodape()}
         </section>`;
@@ -251,15 +325,15 @@ function gerarHTML(paginas, totalProdutos) {
   .cabecalho { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #00334d; padding-bottom:8px; margin-bottom:14px; }
   .cabecalho-marca { font-weight:800; letter-spacing:3px; color:#00334d; font-size:14px; }
   .cabecalho-pagina { font-weight:700; color:#00a859; font-size:13px; }
-  .grade { flex:1; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(4, 1fr); gap:14px; }
-  .produto { display:flex; flex-direction:column; align-items:center; text-align:center; gap:6px; border:1px solid #e6ecf0; border-radius:12px; padding:12px; height:100%; box-shadow:0 2px 8px rgba(0,51,77,.05); }
-  .produto-img { width:65%; max-width:130px; height:48%; min-height:80px; display:flex; align-items:center; justify-content:center; background:#f8fafb; border:1px solid #e6ecf0; border-radius:10px; overflow:hidden; }
+  .grade { flex:1; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(5, 1fr); gap:10px; }
+  .produto { display:flex; flex-direction:row; align-items:center; text-align:left; gap:10px; border:1px solid #e6ecf0; border-radius:10px; padding:8px; height:100%; box-shadow:0 2px 8px rgba(0,51,77,.05); }
+  .produto-img { width:38%; max-width:90px; height:90%; display:flex; align-items:center; justify-content:center; background:#f8fafb; border:1px solid #e6ecf0; border-radius:8px; overflow:hidden; flex:0 0 auto; }
   .produto-img img { max-width:100%; max-height:100%; object-fit:contain; }
-  .produto-info { min-width:0; display:flex; flex-direction:column; align-items:center; }
-  .produto-marca { color:#00a859; font-weight:800; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px; }
-  .produto-nome { font-weight:700; font-size:12.5px; line-height:1.25; margin:4px 0; color:#0f2a3d; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-  .produto-cod { font-size:9.5px; color:#6b7c85; }
-  .produto-preco { display:inline-block; margin-top:5px; padding:3px 12px; border-radius:999px; background:rgba(0,168,89,.12); color:#00753d; font-weight:800; font-size:13px; }
+  .produto-info { min-width:0; display:flex; flex-direction:column; align-items:flex-start; }
+  .produto-marca { color:#00a859; font-weight:800; font-size:8.5px; text-transform:uppercase; letter-spacing:.5px; }
+  .produto-nome { font-weight:700; font-size:11px; line-height:1.2; margin:3px 0; color:#0f2a3d; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .produto-cod { font-size:8.5px; color:#6b7c85; }
+  .produto-preco { display:inline-block; margin-top:4px; padding:2px 10px; border-radius:999px; background:rgba(0,168,89,.12); color:#00753d; font-weight:800; font-size:11.5px; }
   .banner { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background: linear-gradient(160deg, #eef7f2, #dff2e7); border-radius:16px; }
   .banner h2 { color:#00334d; font-size:26px; margin:0 0 8px; }
   .banner p { color:#37525f; font-size:14px; margin:0; }
@@ -276,6 +350,7 @@ ${paginasHtml}
 async function filtrarProdutos(req) {
   const busca = String(req.query.busca || '').trim().toLowerCase();
   const categoria = String(req.query.categoria || '').trim().toLowerCase();
+  const marca = String(req.query.marca || '').trim().toLowerCase();
 
   let produtos = await buscarProdutos();
 
@@ -286,6 +361,9 @@ async function filtrarProdutos(req) {
   }
   if (categoria) {
     produtos = produtos.filter((p) => (p.categoria || '').toLowerCase() === categoria);
+  }
+  if (marca) {
+    produtos = produtos.filter((p) => (p.marca || '').toLowerCase() === marca);
   }
   produtos.sort((a, b) => a.produto.localeCompare(b.produto, 'pt-BR'));
   return produtos;
@@ -367,8 +445,8 @@ function mensagemLimiteExcedido(produtos) {
     `O catálogo filtrado tem ${produtos.length} produtos, e o limite seguro ` +
     `para gerar de uma vez é ${MAX_PRODUTOS_POR_GERACAO} (acima disso o ` +
     `plano gratuito do servidor pode ficar sem memória e o site fica fora ` +
-    `do ar por alguns instantes). Use a busca ou escolha uma categoria ` +
-    `específica no site pra reduzir a quantidade antes de gerar.`
+    `do ar por alguns instantes). Use a busca, ou escolha uma categoria ` +
+    `ou marca específica no site, pra reduzir a quantidade antes de gerar.`
   );
 }
 
