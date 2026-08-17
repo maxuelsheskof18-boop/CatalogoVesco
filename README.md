@@ -34,7 +34,7 @@ próxima visita — normal para um catálogo de uso interno/comercial, sem custo
    .zip pronto pra você arrastar, se preferir não usar GitHub).
 3. No Render, clique em **New +** → **Web Service** e conecte o repositório.
 4. Configuração:
-   - **Build Command:** `npm install`
+   - **Build Command:** `npm install && npx puppeteer browsers install chrome`
    - **Start Command:** `npm start`
    - **Plan:** Free
 5. Clique em **Create Web Service**. Em alguns minutos você recebe um link
@@ -42,6 +42,15 @@ próxima visita — normal para um catálogo de uso interno/comercial, sem custo
 
 Se preferir, o arquivo `render.yaml` já vem pronto: no Render, use a opção
 **Blueprint** e aponte para o repositório — ele configura tudo sozinho.
+
+**Sobre o Build Command com `npx puppeteer browsers install chrome`:** é
+necessário porque o `npm install` sozinho às vezes não baixa o navegador
+Chrome que o Puppeteer precisa pra gerar o PDF (o site sobe normalmente, mas
+os botões de PDF/revista digital dão erro de "Não foi possível encontrar o
+Chrome"). Esse comando extra garante que o Chrome seja baixado durante o
+build. Se você já criou o serviço sem esse comando, é só ir em **Settings**
+→ **Build Command** no painel do Render, colar o comando completo acima, e
+rodar um **Manual Deploy** de novo.
 
 ## Como os dados chegam no site
 

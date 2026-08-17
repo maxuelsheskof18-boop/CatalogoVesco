@@ -394,7 +394,10 @@ app.get('/gerar-flipbook', async (req, res) => {
     }
 
     if (!respostaHeyzine.ok || !dados.url) {
-      throw new Error('Heyzine retornou erro: ' + JSON.stringify(dados));
+      throw new Error(
+        'Heyzine retornou erro: ' + JSON.stringify(dados) +
+        ' (URL do PDF que o servidor tentou enviar: ' + urlPdfPublico + ')'
+      );
     }
 
     res.redirect(dados.url);
