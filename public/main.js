@@ -3,7 +3,6 @@
 
   const ITEMS_PER_PAGE = 10;
   const BANNER_EVERY_PAGES = 4;
-  const MOBILE_BREAKPOINT = 780;
 
   const el = {
     busca: document.getElementById('busca'),
@@ -219,10 +218,6 @@
     }[c]));
   }
 
-  function ehModoMobile() {
-    return window.innerWidth < MOBILE_BREAKPOINT;
-  }
-
   // Mede, na hora, quanto espaço realmente sobra na tela pro livro —
   // descontando a altura de verdade do cabeçalho, do rodapé e do
   // contador de página (que pode até quebrar em duas linhas em telas
@@ -249,25 +244,15 @@
     if (lista.length === 0) {
       el.livroWrap.hidden = true;
       el.contador.hidden = true;
-      el.gradeMobile.hidden = true;
       el.statusVazio.hidden = false;
       return;
     }
     el.statusVazio.hidden = true;
 
-    if (ehModoMobile()) {
-      renderizarGradeMobile(lista);
-    } else {
-      renderizarLivro(lista);
-    }
-  }
-
-  function renderizarGradeMobile(lista) {
-    el.livroWrap.hidden = true;
-    el.contador.hidden = true;
-    livroFlip = null;
-    el.gradeMobile.hidden = false;
-    el.gradeMobile.innerHTML = lista.map(cartaoProdutoHTML).join('');
+    // sempre no formato "revista" (livro com efeito de virar página) —
+    // em qualquer tela, do celular ao PC — só o tamanho do livro que se
+    // adapta, o jeito de usar é sempre o mesmo.
+    renderizarLivro(lista);
   }
 
   // ---------------------------------------------------------------
