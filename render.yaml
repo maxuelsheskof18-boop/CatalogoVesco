@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: catalogo-vesco
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: OPEN_SHEET_URL
+        value: https://opensheet.elk.sh/1NreFb1kPT3BxnOwKyhr532oXsm7cmZCsHIoZ_X_JmHU/Pagina1
+      - key: HEYZINE_CLIENT_ID
+        sync: false
