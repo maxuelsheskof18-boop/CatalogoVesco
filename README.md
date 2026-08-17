@@ -79,9 +79,21 @@ adicione manualmente em **Environment**:
 Depois disso, rode outro **Manual Deploy** → **Clear build cache & deploy**
 (de novo com cache limpo, pra descartar a instalação corrompida anterior).
 
-Depois disso, rode um **Manual Deploy** → **Clear build cache & deploy**
-(importante limpar o cache do build dessa vez, pra forçar o Chrome a ser
-baixado de novo já no caminho certo).
+## Limite de produtos por geração (plano gratuito)
+
+Gerar o PDF ou a revista digital usa o Chrome de verdade rodando por trás —
+com centenas de produtos e fotos de uma vez, isso consome bastante memória.
+No plano gratuito do Render (512 MB de RAM), tentar gerar o catálogo
+**completo** (ex: quase 900 produtos) pode estourar a memória e derrubar o
+serviço inteiro por alguns instantes (aparece como "502 Bad Gateway" pro
+visitante, sem nenhuma mensagem clara).
+
+Pra evitar isso, o servidor recusa gerar mais de `MAX_PRODUTOS_POR_GERACAO`
+produtos de uma vez (200 por padrão — dá pra ajustar essa constante no topo
+do `server.js`) e mostra uma mensagem pedindo pra filtrar por busca ou
+categoria antes. Se seu catálogo tem centenas de produtos e você quer poder
+gerar tudo de uma vez sem esse limite, o caminho é migrar pra um plano pago
+do Render com mais RAM.
 
 ## Como os dados chegam no site
 

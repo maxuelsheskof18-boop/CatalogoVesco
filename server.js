@@ -35,6 +35,15 @@ const TMP_DIR = path.join(__dirname, 'public', 'tmp');
 const ITEMS_PER_PAGE = 8;
 const BANNER_EVERY_PAGES = 4;
 
+// Limite de segurança: gerar o catálogo inteiro (centenas de produtos, cada
+// um com foto) de uma vez usa bastante memória no Chrome headless. No plano
+// gratuito do Render (512 MB de RAM) isso pode estourar a memória e derrubar
+// o serviço inteiro (aparece como "502 Bad Gateway", sem nenhuma mensagem de
+// erro clara). Em vez de deixar isso acontecer, cortamos aqui com uma
+// mensagem explicando o que fazer. Pode aumentar esse número com segurança
+// se o plano do Render for maior que o gratuito.
+const MAX_PRODUTOS_POR_GERACAO = 200;
+
 // placeholder "sem imagem" em SVG (não depende de arquivo externo)
 const SEM_IMAGEM_DATA_URL =
   'data:image/svg+xml;base64,' +
@@ -353,11 +362,24 @@ async function gerarPdfBuffer(produtos) {
   }
 }
 
+function mensagemLimiteExcedido(produtos) {
+  return (
+    `O catálogo filtrado tem ${produtos.length} produtos, e o limite seguro ` +
+    `para gerar de uma vez é ${MAX_PRODUTOS_POR_GERACAO} (acima disso o ` +
+    `plano gratuito do servidor pode ficar sem memória e o site fica fora ` +
+    `do ar por alguns instantes). Use a busca ou escolha uma categoria ` +
+    `específica no site pra reduzir a quantidade antes de gerar.`
+  );
+}
+
 app.get('/gerar-pdf', async (req, res) => {
   try {
     const produtos = await filtrarProdutos(req);
     if (produtos.length === 0) {
       return res.status(404).send('Nenhum produto encontrado para gerar o catálogo.');
+    }
+    if (produtos.length > MAX_PRODUTOS_POR_GERACAO) {
+      return res.status(413).send(mensagemLimiteExcedido(produtos));
     }
 
     const pdfBuffer = await gerarPdfBuffer(produtos);
@@ -386,6 +408,9 @@ app.get('/gerar-flipbook', async (req, res) => {
     const produtos = await filtrarProdutos(req);
     if (produtos.length === 0) {
       return res.status(404).send('Nenhum produto encontrado para gerar o catálogo.');
+    }
+    if (produtos.length > MAX_PRODUTOS_POR_GERACAO) {
+      return res.status(413).send(mensagemLimiteExcedido(produtos));
     }
 
     const pdfBuffer = await gerarPdfBuffer(produtos);
