@@ -10,3 +10,5 @@ services:
         value: https://opensheet.elk.sh/1NreFb1kPT3BxnOwKyhr532oXsm7cmZCsHIoZ_X_JmHU/Pagina1
       - key: HEYZINE_CLIENT_ID
         sync: false
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/project/.cache/puppeteer

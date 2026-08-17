@@ -52,6 +52,21 @@ build. Se você já criou o serviço sem esse comando, é só ir em **Settings**
 → **Build Command** no painel do Render, colar o comando completo acima, e
 rodar um **Manual Deploy** de novo.
 
+**Se mesmo assim continuar dizendo "Could not find Chrome":** é um
+comportamento específico do Render — a pasta onde o Chrome é baixado por
+padrão (fora da pasta do projeto) não é sempre preservada entre o build e a
+execução do serviço. A correção é apontar essa pasta pra dentro da pasta do
+projeto, através da variável de ambiente `PUPPETEER_CACHE_DIR` (o
+`render.yaml` já vem com ela configurada). Se o seu serviço já existia antes
+dessa variável, adicione manualmente em **Environment**, no Render:
+
+- Nome: `PUPPETEER_CACHE_DIR`
+- Valor: `/opt/render/project/.cache/puppeteer`
+
+Depois disso, rode um **Manual Deploy** → **Clear build cache & deploy**
+(importante limpar o cache do build dessa vez, pra forçar o Chrome a ser
+baixado de novo já no caminho certo).
+
 ## Como os dados chegam no site
 
 O site busca os produtos direto da mesma planilha do Google Sheets que o
