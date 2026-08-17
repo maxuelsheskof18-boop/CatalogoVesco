@@ -166,7 +166,7 @@
     return `
       <article class="produto-card">
         <img src="${img}" alt="${nome}" loading="lazy" onerror="this.src='/sem-imagem.svg'"/>
-        <div>
+        <div class="produto-info">
           <div class="produto-marca">${escapeHtml(p.marca || 'Vesco')}</div>
           <div class="produto-nome">${nome}</div>
           <div class="produto-cod">Cód: ${escapeHtml(p.codigo || '—')}</div>
