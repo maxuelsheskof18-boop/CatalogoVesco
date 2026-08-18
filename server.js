@@ -444,6 +444,15 @@ async function renderizarLoteParaArquivo(html, caminhoDestino) {
   try {
     browser = await puppeteer.launch({
       headless: true,
+      // O Puppeteer, por padrão, só espera 30s o Chrome terminar de abrir
+      // (timeout do launch em si — diferente do protocolTimeout abaixo, que
+      // é sobre comandos DEPOIS de já estar aberto). No plano gratuito do
+      // Render, com CPU compartilhada e lenta, abrir o Chrome do zero a
+      // CADA lote (como fazemos agora, de propósito, pra liberar memória
+      // entre um lote e outro) às vezes passa desses 30s — foi exatamente
+      // o erro "Timed out after waiting 30000ms" que apareceu na revista
+      // digital. Por isso damos uma folga bem maior aqui.
+      timeout: 90000,
       protocolTimeout: 120000,
       args: CHROME_ARGS
     });
@@ -700,11 +709,16 @@ app.get('/gerar-flipbook', async (req, res) => {
   }
 });
 
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Catálogo Vesco rodando em http://localhost:${PORT}`);
-  });
-}
+// Liga o servidor sempre (sem depender de "require.main === module").
+// Alguns painéis de hospedagem (Hostinger/hPanel, cPanel com Passenger,
+// entre outros) carregam esse arquivo através do próprio sistema deles
+// pra gerenciar o processo — nesses casos "require.main" nunca é
+// exatamente igual a este arquivo, então aquela checagem antiga nunca
+// era verdadeira e o app.listen() nunca rodava, deixando a aplicação de
+// pé mas sem escutar em porta nenhuma ("App did not call listen()").
+app.listen(PORT, () => {
+  console.log(`Catálogo Vesco rodando em http://localhost:${PORT}`);
+});
 
 // exportado só para possibilitar testes automatizados do template do PDF
 module.exports = { gerarHTML, montarPaginas, formatarPreco, escapeHtml, normalizarProduto };
