@@ -3,11 +3,11 @@
 
   const ITEMS_PER_PAGE = 10;
   const BANNER_EVERY_PAGES = 4;
-  const MOBILE_BREAKPOINT = 780;
 
   const el = {
     busca: document.getElementById('busca'),
     categoria: document.getElementById('categoria'),
+    marca: document.getElementById('marca'),
     btnBaixarPdf: document.getElementById('btnBaixarPdf'),
     btnVerRevista: document.getElementById('btnVerRevista'),
     statusCarregando: document.getElementById('statusCarregando'),
@@ -46,6 +46,7 @@
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       todosProdutos = await resp.json();
       preencherCategorias(todosProdutos);
+      preencherMarcas(todosProdutos);
       el.statusCarregando.hidden = true;
       renderizar();
     } catch (err) {
@@ -69,13 +70,31 @@
     });
   }
 
+  function preencherMarcas(produtos) {
+    if (!el.marca) return;
+    const marcas = Array.from(
+      new Set(produtos.map((p) => (p.marca || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+    marcas.forEach((marca) => {
+      const opt = document.createElement('option');
+      opt.value = marca;
+      opt.textContent = marca;
+      el.marca.appendChild(opt);
+    });
+  }
+
   function produtosFiltrados() {
     const termo = normalizarTexto(el.busca.value);
     const categoria = el.categoria.value;
+    const marca = el.marca ? el.marca.value : '';
 
     let lista = todosProdutos;
     if (categoria) {
       lista = lista.filter((p) => (p.categoria || '') === categoria);
+    }
+    if (marca) {
+      lista = lista.filter((p) => (p.marca || '') === marca);
     }
     if (termo) {
       const palavras = termo.split(' ').filter(Boolean);
@@ -91,10 +110,25 @@
     const params = new URLSearchParams();
     if (el.busca.value.trim()) params.set('busca', el.busca.value.trim());
     if (el.categoria.value) params.set('categoria', el.categoria.value);
+    if (el.marca && el.marca.value) params.set('marca', el.marca.value);
     const query = params.toString() ? '?' + params.toString() : '';
     el.btnBaixarPdf.href = '/gerar-pdf' + query;
     if (el.btnVerRevista) el.btnVerRevista.href = '/gerar-flipbook' + query;
   }
+
+  // Frases da página de destaque que aparece entre os produtos — uma
+  // diferente a cada vez que ela aparece (em vez de repetir sempre a
+  // mesma), pra prender mais a atenção de quem está folheando.
+  const FRASES_DESTAQUE = [
+    { titulo: 'Higiene que sua empresa pode confiar', texto: 'Produtos de alta performance para manter seu espaço impecável, todos os dias.' },
+    { titulo: 'Mais limpeza, menos preocupação', texto: 'Ótimo rendimento e performance profissional — a escolha certa pra quem quer economia sem abrir mão da qualidade.' },
+    { titulo: 'Seleção Vesco', texto: 'Os produtos mais procurados do nosso catálogo, com a qualidade que só quem entende de higiene profissional entrega.' },
+    { titulo: 'A primeira impressão começa na limpeza', texto: 'Eleve o padrão do seu espaço com produtos que unem qualidade, cuidado e performance em cada detalhe.' },
+    { titulo: 'Seu negócio limpo, sua reputação em dia', texto: 'Soluções completas em higiene pra você cuidar do que importa, com a tranquilidade de ter o produto certo em mãos.' },
+    { titulo: 'Praticidade que rende de verdade', texto: 'Produtos pensados pro dia a dia da sua operação — menos reposição, mais resultado.' },
+    { titulo: 'Feito pra quem exige o melhor', texto: 'Fornecedores de confiança, produtos testados e aprovados por quem vive a rotina da limpeza profissional.' },
+    { titulo: 'Limpeza que também é cuidado', texto: 'Cada produto Vesco carrega o compromisso de proteger pessoas e espaços com qualidade de verdade.' }
+  ];
 
   function montarPaginasHTML(produtos) {
     const paginasProdutos = [];
@@ -105,10 +139,12 @@
     const paginas = [];
     paginas.push(paginaCapa());
 
+    let contadorDestaque = 0;
     paginasProdutos.forEach((itens, idx) => {
       paginas.push(paginaProdutos(itens, idx + 2));
       if ((idx + 1) % BANNER_EVERY_PAGES === 0 && idx !== paginasProdutos.length - 1) {
-        paginas.push(paginaBanner());
+        paginas.push(paginaBanner(contadorDestaque));
+        contadorDestaque += 1;
       }
     });
 
@@ -136,13 +172,14 @@
     return div;
   }
 
-  function paginaBanner() {
+  function paginaBanner(indice) {
+    const frase = FRASES_DESTAQUE[indice % FRASES_DESTAQUE.length];
     const div = document.createElement('div');
     div.className = 'pagina-livro';
     div.innerHTML = `
       <div class="pagina-banner">
-        <h2>Linha Destaque</h2>
-        <p>Produtos com qualidade e performance para o seu negócio.</p>
+        <h2>${escapeHtml(frase.titulo)}</h2>
+        <p>${escapeHtml(frase.texto)}</p>
       </div>
       <div class="pagina-rodape">Catálogo Vesco — Soluções em Higiene e Limpeza</div>`;
     return div;
@@ -181,8 +218,23 @@
     }[c]));
   }
 
-  function ehModoMobile() {
-    return window.innerWidth < MOBILE_BREAKPOINT;
+  // Mede, na hora, quanto espaço realmente sobra na tela pro livro —
+  // descontando a altura de verdade do cabeçalho, do rodapé e do
+  // contador de página (que pode até quebrar em duas linhas em telas
+  // estreitas). Guarda o resultado numa variável CSS (--livro-h) que o
+  // style.css usa pra dimensionar o livro certinho, sem cortar nenhum
+  // produto e sem nunca "vazar" pra fora da tela.
+  function ajustarAlturaLivro() {
+    const topoEl = document.querySelector('.topo');
+    const rodapeEl = document.querySelector('.rodape-site');
+    const topoH = topoEl ? topoEl.getBoundingClientRect().height : 0;
+    const rodapeH = rodapeEl ? rodapeEl.getBoundingClientRect().height : 0;
+    const contadorH = (el.contador && !el.contador.hidden)
+      ? el.contador.getBoundingClientRect().height + 14
+      : 0;
+    const folga = 20; // respiro extra pra não colar nas bordas
+    const disponivel = Math.max(260, window.innerHeight - topoH - rodapeH - contadorH - folga);
+    document.documentElement.style.setProperty('--livro-h', disponivel + 'px');
   }
 
   function renderizar() {
@@ -192,25 +244,15 @@
     if (lista.length === 0) {
       el.livroWrap.hidden = true;
       el.contador.hidden = true;
-      el.gradeMobile.hidden = true;
       el.statusVazio.hidden = false;
       return;
     }
     el.statusVazio.hidden = true;
 
-    if (ehModoMobile()) {
-      renderizarGradeMobile(lista);
-    } else {
-      renderizarLivro(lista);
-    }
-  }
-
-  function renderizarGradeMobile(lista) {
-    el.livroWrap.hidden = true;
-    el.contador.hidden = true;
-    livroFlip = null;
-    el.gradeMobile.hidden = false;
-    el.gradeMobile.innerHTML = lista.map(cartaoProdutoHTML).join('');
+    // sempre no formato "revista" (livro com efeito de virar página) —
+    // em qualquer tela, do celular ao PC — só o tamanho do livro que se
+    // adapta, o jeito de usar é sempre o mesmo.
+    renderizarLivro(lista);
   }
 
   // ---------------------------------------------------------------
@@ -280,6 +322,7 @@
     el.gradeMobile.hidden = true;
     el.livroWrap.hidden = false;
     el.contador.hidden = false;
+    ajustarAlturaLivro();
 
     const paginas = montarPaginasHTML(lista);
     livroFlip = new LivroFlip(el.livro, paginas);
@@ -299,12 +342,21 @@
     debounceTimer = setTimeout(renderizar, 250);
   });
   el.categoria.addEventListener('change', renderizar);
+  if (el.marca) el.marca.addEventListener('change', renderizar);
 
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(renderizar, 300);
   });
+
+  // a fonte (Google Fonts) carrega de forma assíncrona e pode alterar
+  // ligeiramente a altura do cabeçalho depois da primeira medição —
+  // por isso recalcula assim que ela termina de carregar.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(ajustarAlturaLivro).catch(() => {});
+  }
+  window.addEventListener('load', ajustarAlturaLivro);
 
   carregarProdutos();
 })();

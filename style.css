@@ -8,6 +8,10 @@
   --muted: #6b7c85;
   --border: #e6ecf0;
   --radius: 14px;
+  /* espaço horizontal reservado pros botões de "página anterior/próxima"
+     ao redor do livro — encolhe em telas menores pra sobrar mais largura
+     pro livro em si (ver breakpoints mais abaixo). */
+  --livro-chrome-x: 180px;
 }
 
 * { box-sizing: border-box; }
@@ -50,9 +54,10 @@ html, body {
 
 .topo-busca {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   flex: 1 1 380px;
-  max-width: 560px;
+  max-width: 720px;
 }
 .topo-busca input,
 .topo-busca select {
@@ -63,8 +68,14 @@ html, body {
   font-family: inherit;
   outline: none;
 }
-.topo-busca input { flex: 1; min-width: 160px; }
-.topo-busca select { max-width: 190px; color: var(--text); }
+.topo-busca input { flex: 2 1 160px; min-width: 140px; }
+.topo-busca select { flex: 1 1 130px; min-width: 120px; max-width: 190px; color: var(--text); }
+
+.topo-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 
 .botao-baixar {
   background: var(--accent);
@@ -97,11 +108,12 @@ html, body {
 
 /* ---------- livro (flipbook) ---------- */
 main {
-  min-height: calc(100vh - 110px);
+  min-height: calc(100vh - 60px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 14px 10px 24px;
+  justify-content: center;
+  padding: 10px 10px 6px;
 }
 
 .livro-wrap {
@@ -115,13 +127,19 @@ main {
   background: radial-gradient(ellipse at center, rgba(0,51,77,.07) 0%, rgba(0,51,77,0) 72%);
 }
 
-/* a caixa do livro ocupa quase a tela inteira (perto de um leitor em
-   tela cheia) — só os 44px dos botões de navegação de cada lado e uma
-   margem pequena ficam de fora. */
+/* --livro-h é calculada e atualizada via JavaScript (main.js), medindo
+   a altura real do cabeçalho, do rodapé e do contador de página nesse
+   exato instante — por isso o livro sempre sabe, com precisão, quanto
+   espaço realmente sobra na tela, mesmo se o cabeçalho quebrar em duas
+   linhas num celular ou numa janela estreita. As três medidas dentro
+   do min() competem entre si: a menor sempre vence, então a caixa
+   encolhe pela largura OU pela altura, o que for mais apertado — nunca
+   corta produto nenhum, nunca "vaza" pra fora da tela. */
 .livro-stage {
   position: relative;
-  width: min(1300px, 98vw);
-  height: min(1500px, 96vh);
+  width: min(1300px, calc(100vw - var(--livro-chrome-x)), calc(var(--livro-h, 82vh) * 1300 / 1500));
+  aspect-ratio: 1300 / 1500;
+  max-height: var(--livro-h, 82vh);
   perspective: 2200px;
 }
 
@@ -163,7 +181,8 @@ main {
 .nav:hover { background: #eef3f5; }
 
 .contador {
-  margin-top: 10px;
+  flex: 0 0 auto;
+  margin-top: 8px;
   font-size: 13px;
   color: var(--muted);
   font-weight: 600;
@@ -262,6 +281,8 @@ main {
   text-align: left;
   background: #fff;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,51,77,.05);
   transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
 }
@@ -333,18 +354,80 @@ main {
 .grade-mobile .produto-card img { width: 100%; height: 110px; }
 
 .rodape-site {
+  flex: 0 0 auto;
   text-align: center;
   font-size: 12px;
   color: var(--muted);
-  padding: 16px;
+  padding: 10px 16px;
   border-top: 1px solid var(--border);
   background: #fff;
 }
 
+/* telas médias (tablets, janelas menores de PC): encolhe as margens e
+   os botões de navegação do livro, pra sobrar mais espaço horizontal
+   pra caixa em si — sem isso, num tablet o livro ficava espremido ou
+   até cortado nas laterais. */
+@media (max-width: 1024px) {
+  :root { --livro-chrome-x: 140px; }
+  .livro-wrap { gap: 6px; padding: 6px; }
+  .nav { width: 38px; height: 38px; font-size: 22px; }
+  .pagina-livro { padding: 22px 18px 14px; }
+  .pagina-cabecalho { font-size: 13px; margin-bottom: 12px; padding-bottom: 8px; }
+  .pagina-grade { gap: 8px; }
+  .produto-card { padding: 7px; gap: 7px; border-radius: 10px; }
+  .produto-card .produto-marca { font-size: 8.5px; }
+  .produto-card .produto-nome { font-size: 10.5px; }
+  .produto-card .produto-cod { font-size: 8.5px; }
+  .produto-card .produto-preco { font-size: 10.5px; padding: 2px 8px; margin-top: 3px; }
+  .pagina-capa h1 { font-size: 30px; }
+  .pagina-capa p { font-size: 14px; }
+  .pagina-capa .capa-marca { font-size: 13px; margin-bottom: 14px; }
+}
+
+@media (max-width: 900px) {
+  .topo { gap: 12px; padding: 12px 16px; }
+  .topo-busca { max-width: none; }
+}
+
 @media (max-width: 720px) {
   .topo { padding: 12px 16px; }
-  .topo-busca { order: 3; flex-basis: 100%; }
   .botao-baixar span { display: none; }
   .botao-baixar::after { content: '⬇ PDF'; }
   .botao-secundario::after { content: '📖 Revista'; }
+}
+
+/* celular: exatamente a mesma aparência do site inteiro (mesmo
+   cabeçalho, mesmo livro com 2 colunas de produto por página) — só
+   menor, pra caber na tela. Nada de reorganizar ou trocar o layout,
+   só encolher tudo proporcionalmente. Abaixo desse tamanho o
+   cabeçalho empilha em coluna (marca, busca, botões, cada um ocupando
+   a largura toda) em vez de tentar quebrar linha sozinho de um jeito
+   imprevisível. */
+@media (max-width: 640px) {
+  :root { --livro-chrome-x: 60px; }
+  .topo { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px; }
+  .topo-marca { margin-right: 0; flex-direction: row; align-items: baseline; gap: 8px; }
+  /* sem isso, o "flex: 1 1 380px" (pensado pro cabeçalho em linha)
+     faz a busca esticar pra ocupar o espaço vertical todo do
+     cabeçalho empilhado, virando um balão gigante */
+  .topo-busca { flex: 0 0 auto; max-width: none; }
+  .topo-acoes { flex: 0 0 auto; width: 100%; }
+  .topo-acoes .botao-baixar { flex: 1 1 0; text-align: center; }
+  main { padding: 6px 4px 4px; }
+  .livro-wrap { gap: 2px; padding: 2px; }
+  .nav { width: 26px; height: 26px; font-size: 15px; }
+  .pagina-livro { padding: 8px 8px 5px; }
+  .pagina-cabecalho { font-size: 9px; margin-bottom: 5px; padding-bottom: 3px; }
+  .pagina-grade { gap: 4px; }
+  .produto-card { padding: 3px; gap: 4px; border-radius: 6px; }
+  .produto-card img { width: 30%; }
+  .produto-card .produto-marca { font-size: 6.5px; }
+  .produto-card .produto-nome { font-size: 8px; line-height: 1.1; margin: 1px 0; }
+  .produto-card .produto-cod { font-size: 6.5px; }
+  .produto-card .produto-preco { font-size: 8px; padding: 1px 6px; margin-top: 1px; }
+  .pagina-capa h1 { font-size: 20px; }
+  .pagina-capa p { font-size: 11px; }
+  .pagina-capa .capa-marca { font-size: 10px; margin-bottom: 8px; letter-spacing: 4px; }
+  .pagina-banner h2 { font-size: 13px; }
+  .pagina-banner p { font-size: 10px; padding: 0 6px; }
 }

@@ -55,6 +55,25 @@ const MAX_PRODUTOS_POR_GERACAO = 2000;
 // plano gratuito do Render (o limite antigo, de geração única, era 200).
 const LOTE_PAGINAS_PDF = 15;
 
+// Cache em memória do PDF/revista já gerados, por combinação de filtros
+// (busca + categoria + marca). É o que faz o botão ficar rápido depois da
+// primeira vez — gerar o PDF com o Chrome headless é sempre a parte lenta
+// (ainda mais no plano gratuito do Render, com CPU compartilhada e o site
+// "dormindo" depois de 15 min sem uso), então evitamos repetir esse trabalho
+// pra cada clique. Some da memória se o servidor reiniciar, e é gerado de
+// novo automaticamente na próxima vez — sem precisar de nenhum banco de
+// dados nem configuração extra.
+const PDF_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
+const cachePdf = new Map(); // chave -> { buffer, geradoEm }
+const cacheFlipbook = new Map(); // chave -> { url, geradoEm }
+
+function chaveCache(req) {
+  const busca = String(req.query.busca || '').trim().toLowerCase();
+  const categoria = String(req.query.categoria || '').trim().toLowerCase();
+  const marca = String(req.query.marca || '').trim().toLowerCase();
+  return `${busca}|${categoria}|${marca}`;
+}
+
 // placeholder "sem imagem" em SVG (não depende de arquivo externo)
 const SEM_IMAGEM_DATA_URL =
   'data:image/svg+xml;base64,' +
@@ -399,8 +418,12 @@ async function renderizarHTMLparaPDF(browser, html) {
     // (URLs externas) carregando ao mesmo tempo, basta UMA foto lenta ou
     // travada pra isso nunca "ficar ocioso" e estourar o timeout inteiro
     // (foi exatamente o que causou o "Navigation timeout exceeded" com o
-    // catálogo completo, antes de existir a geração em lotes).
-    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // catálogo completo, antes de existir a geração em lotes). O timeout
+    // aqui é generoso (60s, não os 30s de antes) porque no plano gratuito
+    // do Render a CPU é compartilhada e o site "dorme" depois de 15 min sem
+    // uso — a primeira geração depois de um tempo parado pode ser bem mais
+    // lenta que o normal só pra ligar o Chrome headless.
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     // Em vez disso, esperamos as fotos em paralelo com um limite de tempo
     // PRÓPRIO POR FOTO: cada uma tem até 8s pra carregar; a que não
@@ -522,7 +545,18 @@ app.get('/gerar-pdf', async (req, res) => {
       return res.status(413).send(mensagemLimiteExcedido(produtos));
     }
 
-    const pdfBuffer = await gerarPdfBuffer(produtos);
+    // se já geramos esse mesmo PDF (mesma busca/categoria/marca) há pouco
+    // tempo, reaproveita em vez de acionar o Chrome headless de novo — é o
+    // que faz o botão responder na hora depois do primeiro clique
+    const chave = chaveCache(req);
+    const cacheado = cachePdf.get(chave);
+    let pdfBuffer;
+    if (cacheado && Date.now() - cacheado.geradoEm < PDF_CACHE_TTL_MS) {
+      pdfBuffer = cacheado.buffer;
+    } else {
+      pdfBuffer = await gerarPdfBuffer(produtos);
+      cachePdf.set(chave, { buffer: pdfBuffer, geradoEm: Date.now() });
+    }
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="catalogo-vesco.pdf"');
@@ -551,6 +585,16 @@ app.get('/gerar-flipbook', async (req, res) => {
     }
     if (produtos.length > MAX_PRODUTOS_POR_GERACAO) {
       return res.status(413).send(mensagemLimiteExcedido(produtos));
+    }
+
+    // se essa mesma combinação de filtros já virou um link do Heyzine há
+    // pouco tempo, reaproveita em vez de gerar o PDF de novo e subir pro
+    // Heyzine de novo — sem isso, cada clique criava um catálogo novo lá
+    // (lento, e ainda deixava link antigo "solto" na conta do Heyzine)
+    const chave = chaveCache(req);
+    const cacheado = cacheFlipbook.get(chave);
+    if (cacheado && Date.now() - cacheado.geradoEm < PDF_CACHE_TTL_MS) {
+      return res.redirect(cacheado.url);
     }
 
     const pdfBuffer = await gerarPdfBuffer(produtos);
@@ -594,6 +638,12 @@ app.get('/gerar-flipbook', async (req, res) => {
         ' (URL do PDF que o servidor tentou enviar: ' + urlPdfPublico + ')'
       );
     }
+
+    cacheFlipbook.set(chave, { url: dados.url, geradoEm: Date.now() });
+    // já que o PDF foi gerado agora mesmo, deixa também no cache do
+    // "Baixar catálogo em PDF" — evita gerar tudo de novo se o próximo
+    // clique for nesse outro botão, com os mesmos filtros
+    cachePdf.set(chave, { buffer: pdfBuffer, geradoEm: Date.now() });
 
     res.redirect(dados.url);
   } catch (err) {
