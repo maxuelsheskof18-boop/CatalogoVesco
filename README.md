@@ -139,3 +139,25 @@ porque o Heyzine precisa conseguir baixar o PDF gerado pela internet. Rodando
 só em `localhost` no seu computador, o Heyzine não consegue alcançar o
 arquivo e a geração falha — isso é esperado, não é erro. Depois de publicado
 no Render (ou onde for), funciona normalmente.
+
+## Pré-aquecimento automático (deixa os dois botões mais rápidos)
+
+Assim que o servidor sobe, e depois a cada ~100 minutos, ele gera sozinho o
+PDF e a revista digital do catálogo **completo** (sem nenhum filtro) e deixa
+prontos no cache — é o caso mais comum, de longe. Assim, na maioria das
+vezes, os dois botões respondem quase na hora, em vez do visitante ter que
+esperar o Chrome gerar tudo do zero. Buscas com filtro (categoria, marca,
+texto) continuam sendo geradas só quando alguém realmente pede — como têm
+menos produtos, já são naturalmente mais rápidas.
+
+Pra esse pré-aquecimento também valer para o botão "Ver como revista
+online", defina a variável de ambiente `SITE_URL` com o link público do
+site (ex.: `https://catalogo.vesco.com.br`) — é o mesmo motivo do aviso
+acima: o Heyzine precisa de um link público pra baixar o PDF, e como esse
+pré-aquecimento roda sozinho (sem visitante nenhum clicando em nada), não
+tem como descobrir esse link sozinho. No Render isso já funciona automático
+(ele expõe essa informação numa variável própria); em outras hospedagens
+(Hostinger, etc.) defina `SITE_URL` manualmente nas variáveis de ambiente
+do site. Sem essa variável, o PDF continua sendo pré-aquecido normalmente —
+só a revista digital que fica de fora do pré-aquecimento (mas o botão
+continua funcionando normalmente, só sem o ganho de velocidade).

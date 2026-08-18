@@ -33,6 +33,16 @@ const HEYZINE_CLIENT_ID =
   '0feeb11c5431caa2';
 const TMP_DIR = path.join(__dirname, 'public', 'tmp');
 
+// Link público do site (ex.: https://catalogo.vesco.com.br), usado só pelo
+// pré-aquecimento automático do cache (ver preAquecerCacheCompleto mais
+// abaixo) pra montar a URL do PDF que o Heyzine precisa baixar — nesse caso
+// não existe uma requisição de visitante de onde tirar esse endereço, como
+// acontece nas rotas normais. Opcional: sem essa variável, o pré-aquecimento
+// da revista digital é só pulado (o PDF continua sendo pré-aquecido normal).
+// No Render essa variável já vem pronta sozinha (RENDER_EXTERNAL_URL); em
+// outras hospedagens (Hostinger, etc.) defina SITE_URL manualmente.
+const SITE_URL = (process.env.SITE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
+
 const ITEMS_PER_PAGE = 10;
 const BANNER_EVERY_PAGES = 4;
 
@@ -78,6 +88,12 @@ function chaveCache(req) {
   const marca = String(req.query.marca || '').trim().toLowerCase();
   return `${busca}|${categoria}|${marca}`;
 }
+
+// Chave de cache do catálogo "sem filtro nenhum" (todos os produtos) — é a
+// combinação usada pelo pré-aquecimento automático (preAquecerCacheCompleto,
+// mais abaixo) e é também a chave que uma visita ao site sem nenhuma busca
+// ativa vai bater automaticamente.
+const CHAVE_CACHE_TUDO = chaveCache({ query: {} });
 
 // placeholder "sem imagem" em SVG (não depende de arquivo externo)
 const SEM_IMAGEM_DATA_URL =
@@ -151,11 +167,23 @@ const REGRAS_CATEGORIA = [
   ['Lençol Hospitalar', /lencol hospitalar|lencol descartavel/],
   ['Guardanapo', /guardanapo/],
   ['Sabonete', /sabonete|sabao liquido|sabao em barra|sabao em pedra/],
+  // "Desincrustante" precisa vir antes de "Desinfetante" — são produtos
+  // diferentes (um remove incrustação/resíduo, outro desinfeta), mas
+  // "desincrustante" nunca vai bater com o regex de "desinfetante" mesmo
+  // assim, então a ordem aqui é só por organização.
+  ['Desincrustante', /desincrustante|anti[- ]?incrustante|removedor de incrustac/],
   ['Desinfetante', /desinfetante/],
   ['Álcool', /\balcool\b/],
   ['Água Sanitária', /agua sanitaria|\bcloro\b|hipoclorito/],
   ['Detergente', /detergente|sabao em po|lava roupa|lava-roupa/],
   ['Amaciante', /amaciante/],
+  // "Ceras" precisa vir antes de "Removedores" — um "removedor de ceras
+  // acrílicas" é sobre cera, não um removedor genérico qualquer.
+  ['Ceras e Impermeabilizantes', /\bceras?\b|acabamento acrilico|impermeabilizante|selador/],
+  ['Removedores', /\bremovedor(es)?\b/],
+  ['Baldes', /\bbalde/],
+  ['Cabos e Hastes', /\bcabo(s)?\b|\bhaste(s)?\b/],
+  ['Mops e Refis', /\bmop\b|refil.*mop/],
   ['Sacos de Lixo', /saco.*lixo|lixo.*saco/],
   ['Copos Descartáveis', /copo descart/],
   ['Luvas', /\bluva/],
@@ -182,6 +210,23 @@ function categorizarProduto(nomeProduto) {
   return regra ? regra[0] : '';
 }
 
+// Quando nenhuma regra de palavra-chave bate com o nome do produto, em vez
+// de usar a categoria "crua" da planilha (que às vezes vem como um caminho
+// enorme tipo "Casa, Móveis e Decoração >> Cuidado da Casa e Lavanderia >>
+// Produtos de Limpeza >> Água Sanitária" — poluindo o filtro do site com
+// opções gigantes e repetitivas), pega só o ÚLTIMO pedaço desse caminho
+// (o mais específico) como categoria — no exemplo acima, viraria só "Água
+// Sanitária". Fica simples de qualquer jeito, mesmo sem bater em nenhuma
+// palavra-chave configurada manualmente.
+function categoriaSimplesDoCaminho(bruta) {
+  if (!bruta) return '';
+  const partes = String(bruta)
+    .split('>>')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return partes.length ? partes[partes.length - 1] : '';
+}
+
 function normalizarProduto(p) {
   const imagemBruta = (p.imagem || '').trim();
   const imagemValida = imagemBruta.startsWith('http') ? imagemBruta : '';
@@ -190,7 +235,7 @@ function normalizarProduto(p) {
     codigo: p.codigo || '',
     produto: nome,
     marca: p.marca || '',
-    categoria: categorizarProduto(nome) || p.categoria || 'Outros',
+    categoria: categorizarProduto(nome) || categoriaSimplesDoCaminho(p.categoria) || 'Outros',
     custo: p.custo || '',
     venda: p.venda || '',
     imagem: imagemValida,
@@ -625,41 +670,19 @@ app.get('/gerar-pdf', async (req, res) => {
 // formato "revista digital" (efeito de página realista, pronto pra
 // compartilhar) — é o que o botão "Ver como revista online" usa.
 // ---------------------------------------------------------------
-app.get('/gerar-flipbook', async (req, res) => {
-  let caminhoTemp = null;
+// Sobe um PDF já pronto (buffer) pro Heyzine e devolve o link da revista
+// digital. Extraída da rota abaixo pra também poder ser chamada pelo
+// pré-aquecimento automático do cache (preAquecerCacheCompleto), que roda
+// sozinho em segundo plano, sem uma requisição de visitante por trás.
+async function converterParaFlipbook(pdfBuffer, baseUrl) {
+  // salva o PDF temporariamente numa pasta pública, pra ter uma URL que o
+  // Heyzine consiga baixar (a API dele pede uma URL, não aceita upload direto)
+  await fs.mkdir(TMP_DIR, { recursive: true });
+  const nomeArquivo = `catalogo-${crypto.randomBytes(8).toString('hex')}.pdf`;
+  const caminhoTemp = path.join(TMP_DIR, nomeArquivo);
+  await fs.writeFile(caminhoTemp, pdfBuffer);
+
   try {
-    if (!HEYZINE_CLIENT_ID) {
-      return res.status(500).send('HEYZINE_CLIENT_ID não configurada no servidor.');
-    }
-
-    const produtos = await filtrarProdutos(req);
-    if (produtos.length === 0) {
-      return res.status(404).send('Nenhum produto encontrado para gerar o catálogo.');
-    }
-    if (produtos.length > MAX_PRODUTOS_POR_GERACAO) {
-      return res.status(413).send(mensagemLimiteExcedido(produtos));
-    }
-
-    // se essa mesma combinação de filtros já virou um link do Heyzine há
-    // pouco tempo, reaproveita em vez de gerar o PDF de novo e subir pro
-    // Heyzine de novo — sem isso, cada clique criava um catálogo novo lá
-    // (lento, e ainda deixava link antigo "solto" na conta do Heyzine)
-    const chave = chaveCache(req);
-    const cacheado = cacheFlipbook.get(chave);
-    if (cacheado && Date.now() - cacheado.geradoEm < PDF_CACHE_TTL_MS) {
-      return res.redirect(cacheado.url);
-    }
-
-    const pdfBuffer = await gerarPdfBuffer(produtos);
-
-    // salva o PDF temporariamente numa pasta pública, pra ter uma URL que o
-    // Heyzine consiga baixar (a API dele pede uma URL, não aceita upload direto)
-    await fs.mkdir(TMP_DIR, { recursive: true });
-    const nomeArquivo = `catalogo-${crypto.randomBytes(8).toString('hex')}.pdf`;
-    caminhoTemp = path.join(TMP_DIR, nomeArquivo);
-    await fs.writeFile(caminhoTemp, pdfBuffer);
-
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const urlPdfPublico = `${baseUrl}/tmp/${nomeArquivo}`;
 
     // O endpoint /api1/rest autentica via "client_id" no corpo da requisição
@@ -692,22 +715,112 @@ app.get('/gerar-flipbook', async (req, res) => {
       );
     }
 
-    cacheFlipbook.set(chave, { url: dados.url, geradoEm: Date.now() });
+    return dados.url;
+  } finally {
+    fs.unlink(caminhoTemp).catch(() => {});
+  }
+}
+
+app.get('/gerar-flipbook', async (req, res) => {
+  try {
+    if (!HEYZINE_CLIENT_ID) {
+      return res.status(500).send('HEYZINE_CLIENT_ID não configurada no servidor.');
+    }
+
+    const produtos = await filtrarProdutos(req);
+    if (produtos.length === 0) {
+      return res.status(404).send('Nenhum produto encontrado para gerar o catálogo.');
+    }
+    if (produtos.length > MAX_PRODUTOS_POR_GERACAO) {
+      return res.status(413).send(mensagemLimiteExcedido(produtos));
+    }
+
+    // se essa mesma combinação de filtros já virou um link do Heyzine há
+    // pouco tempo, reaproveita em vez de gerar o PDF de novo e subir pro
+    // Heyzine de novo — sem isso, cada clique criava um catálogo novo lá
+    // (lento, e ainda deixava link antigo "solto" na conta do Heyzine)
+    const chave = chaveCache(req);
+    const cacheado = cacheFlipbook.get(chave);
+    if (cacheado && Date.now() - cacheado.geradoEm < PDF_CACHE_TTL_MS) {
+      return res.redirect(cacheado.url);
+    }
+
+    const pdfBuffer = await gerarPdfBuffer(produtos);
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const urlFlipbook = await converterParaFlipbook(pdfBuffer, baseUrl);
+
+    cacheFlipbook.set(chave, { url: urlFlipbook, geradoEm: Date.now() });
     // já que o PDF foi gerado agora mesmo, deixa também no cache do
     // "Baixar catálogo em PDF" — evita gerar tudo de novo se o próximo
     // clique for nesse outro botão, com os mesmos filtros
     cachePdf.set(chave, { buffer: pdfBuffer, geradoEm: Date.now() });
 
-    res.redirect(dados.url);
+    res.redirect(urlFlipbook);
   } catch (err) {
     console.error('Erro /gerar-flipbook:', err);
     res.status(500).send('Erro ao gerar o catálogo em revista digital: ' + err.message);
-  } finally {
-    if (caminhoTemp) {
-      fs.unlink(caminhoTemp).catch(() => {});
-    }
   }
 });
+
+// ---------------------------------------------------------------
+// Pré-aquecimento automático do cache do catálogo COMPLETO (sem filtro
+// nenhum) — é o caso mais comum, de longe. Em vez de esperar alguém clicar
+// e só aí ligar o Chrome (deixando esse primeiro visitante esperando o
+// processo inteiro), o servidor gera esse PDF/revista sozinho, em segundo
+// plano, assim que sobe e depois periodicamente — pra quando um visitante
+// clicar, o link já estar pronto e a resposta ser praticamente instantânea
+// (é basicamente o mesmo motivo do catálogo de um concorrente citado numa
+// conversa anterior "ser rápido": o dele é sempre um arquivo pronto, nunca
+// gerado na hora). Buscas com filtro (categoria/marca/texto) continuam
+// sendo geradas só quando alguém pede — são mais raras e, por terem menos
+// produtos, já são naturalmente mais rápidas.
+async function preAquecerCacheCompleto() {
+  try {
+    const produtos = await filtrarProdutos({ query: {} });
+    if (produtos.length === 0) {
+      console.warn('Pré-aquecimento do cache pulado: nenhum produto encontrado na planilha.');
+      return;
+    }
+    if (produtos.length > MAX_PRODUTOS_POR_GERACAO) {
+      console.warn(
+        `Pré-aquecimento do cache pulado: catálogo com ${produtos.length} produtos, ` +
+        `acima do limite de segurança (${MAX_PRODUTOS_POR_GERACAO}).`
+      );
+      return;
+    }
+
+    console.log(`Pré-aquecendo cache do catálogo completo (${produtos.length} produtos)...`);
+    const pdfBuffer = await gerarPdfBuffer(produtos);
+    cachePdf.set(CHAVE_CACHE_TUDO, { buffer: pdfBuffer, geradoEm: Date.now() });
+    console.log('Cache do PDF completo pronto.');
+
+    if (HEYZINE_CLIENT_ID && SITE_URL) {
+      const urlFlipbook = await converterParaFlipbook(pdfBuffer, SITE_URL);
+      cacheFlipbook.set(CHAVE_CACHE_TUDO, { url: urlFlipbook, geradoEm: Date.now() });
+      console.log('Cache da revista digital completa pronto.');
+    } else if (HEYZINE_CLIENT_ID) {
+      console.warn(
+        'Pré-aquecimento da revista digital pulado: defina a variável de ambiente ' +
+        'SITE_URL (com o link público do site, ex.: https://catalogo.vesco.com.br) para ativar.'
+      );
+    }
+  } catch (err) {
+    // Nunca deixa um erro aqui derrubar o servidor — na pior das hipóteses,
+    // o pré-aquecimento simplesmente não funcionou dessa vez, e o primeiro
+    // clique de um visitante gera na hora, do jeito que já funcionava antes.
+    console.error(
+      'Erro ao pré-aquecer o cache do catálogo completo (o site continua funcionando ' +
+      'normalmente; só o primeiro clique de um visitante pode demorar mais):',
+      err.message
+    );
+  }
+}
+
+// Renova o cache um pouco antes dele vencer (PDF_CACHE_TTL_MS = 2h), pra um
+// visitante nunca pegar o cache expirado e ter que esperar a geração do zero.
+const PRE_AQUECER_INTERVALO_MS = 100 * 60 * 1000; // 100 minutos
+setTimeout(preAquecerCacheCompleto, 5000); // espera o servidor terminar de subir
+setInterval(preAquecerCacheCompleto, PRE_AQUECER_INTERVALO_MS);
 
 // Liga o servidor sempre (sem depender de "require.main === module").
 // Alguns painéis de hospedagem (Hostinger/hPanel, cPanel com Passenger,

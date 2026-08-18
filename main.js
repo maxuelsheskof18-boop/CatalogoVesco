@@ -8,6 +8,7 @@
     busca: document.getElementById('busca'),
     categoria: document.getElementById('categoria'),
     marca: document.getElementById('marca'),
+    ordenar: document.getElementById('ordenar'),
     btnBaixarPdf: document.getElementById('btnBaixarPdf'),
     btnVerRevista: document.getElementById('btnVerRevista'),
     statusCarregando: document.getElementById('statusCarregando'),
@@ -84,10 +85,21 @@
     });
   }
 
+  // Preço em número puro pra poder comparar/ordenar (a mesma lógica de
+  // "sem preço = Consulte" usada em formatarPreco). Produtos sem preço
+  // (ou preço zerado) voltam "null" aqui, pra sempre irem pro final da
+  // lista quando ordenado por preço — nunca aparecem misturados no meio,
+  // nem no topo, dos "menor/maior preço".
+  function precoNumerico(p) {
+    const num = Number(String(p.venda || '').replace(',', '.').replace(/[^\d.-]/g, ''));
+    return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
   function produtosFiltrados() {
     const termo = normalizarTexto(el.busca.value);
     const categoria = el.categoria.value;
     const marca = el.marca ? el.marca.value : '';
+    const ordenar = el.ordenar ? el.ordenar.value : '';
 
     let lista = todosProdutos;
     if (categoria) {
@@ -103,6 +115,19 @@
         return palavras.every((palavra) => texto.includes(palavra));
       });
     }
+
+    if (ordenar === 'menor-preco' || ordenar === 'maior-preco') {
+      const direcao = ordenar === 'menor-preco' ? 1 : -1;
+      return lista.slice().sort((a, b) => {
+        const pa = precoNumerico(a);
+        const pb = precoNumerico(b);
+        if (pa === null && pb === null) return (a.produto || '').localeCompare(b.produto || '', 'pt-BR');
+        if (pa === null) return 1; // sem preço sempre vai pro final
+        if (pb === null) return -1;
+        return (pa - pb) * direcao;
+      });
+    }
+
     return lista.slice().sort((a, b) => (a.produto || '').localeCompare(b.produto || '', 'pt-BR'));
   }
 
@@ -343,6 +368,7 @@
   });
   el.categoria.addEventListener('change', renderizar);
   if (el.marca) el.marca.addEventListener('change', renderizar);
+  if (el.ordenar) el.ordenar.addEventListener('change', renderizar);
 
   let resizeTimer = null;
   window.addEventListener('resize', () => {
