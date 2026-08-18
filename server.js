@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const crypto = require('crypto');
 const puppeteer = require('puppeteer');
+const { PDFDocument } = require('pdf-lib');
 
 const PORT = process.env.PORT || 3000;
 const OPEN_SHEET_URL =
@@ -35,14 +36,24 @@ const TMP_DIR = path.join(__dirname, 'public', 'tmp');
 const ITEMS_PER_PAGE = 10;
 const BANNER_EVERY_PAGES = 4;
 
-// Limite de segurança: gerar o catálogo inteiro (centenas de produtos, cada
-// um com foto) de uma vez usa bastante memória no Chrome headless. No plano
-// gratuito do Render (512 MB de RAM) isso pode estourar a memória e derrubar
-// o serviço inteiro (aparece como "502 Bad Gateway", sem nenhuma mensagem de
-// erro clara). Em vez de deixar isso acontecer, cortamos aqui com uma
-// mensagem explicando o que fazer. Pode aumentar esse número com segurança
-// se o plano do Render for maior que o gratuito.
-const MAX_PRODUTOS_POR_GERACAO = 200;
+// Gerar o catálogo inteiro (centenas de produtos, cada um com foto) de uma
+// vez só, numa única página do Chrome headless, usa bastante memória — no
+// plano gratuito do Render (512 MB de RAM) isso podia estourar a memória e
+// derrubar o serviço inteiro ("502 Bad Gateway", sem mensagem de erro
+// clara). Por isso, catálogos grandes agora são gerados em LOTES (ver
+// LOTE_PAGINAS_PDF mais abaixo): cada lote vira um PDF separado, numa página
+// do Chrome que é fechada (liberando a memória das fotos) antes do lote
+// seguinte começar, e todos os PDFs são unidos no final. Isso mantém o uso
+// de memória baixo e estável não importa quantos produtos tenham no total.
+// MAX_PRODUTOS_POR_GERACAO continua existindo só como um teto de segurança
+// bem folgado, caso o catálogo cresça demais no futuro.
+const MAX_PRODUTOS_POR_GERACAO = 2000;
+
+// Quantas "páginas" (cada uma com até ITEMS_PER_PAGE produtos) entram em
+// cada lote/PDF parcial. 15 páginas × 10 produtos = até 150 produtos com
+// foto carregados de uma vez no Chrome — um valor já testado como seguro no
+// plano gratuito do Render (o limite antigo, de geração única, era 200).
+const LOTE_PAGINAS_PDF = 15;
 
 // placeholder "sem imagem" em SVG (não depende de arquivo externo)
 const SEM_IMAGEM_DATA_URL =
@@ -240,10 +251,15 @@ function montarPaginas(produtos) {
   return paginas;
 }
 
-function gerarHTML(paginas, totalProdutos) {
+// `paginas` é só o pedaço (lote) que vai virar HTML dessa vez — pode ser o
+// catálogo inteiro (geração simples) ou só uma fatia dele (geração em
+// lotes). `incluirCapa` liga a capa só no primeiro lote, e `numeroInicial`
+// continua a numeração das páginas de onde o lote anterior parou.
+function gerarHTML(paginas, totalProdutos, opts = {}) {
+  const { incluirCapa = true, numeroInicial = 2 } = opts;
   const dataGeracao = new Date().toLocaleDateString('pt-BR');
 
-  const capa = `
+  const capa = !incluirCapa ? '' : `
     <section class="pagina capa">
       <div class="capa-conteudo">
         <div class="capa-marca">VESCO</div>
@@ -255,7 +271,7 @@ function gerarHTML(paginas, totalProdutos) {
 
   const paginasHtml = paginas
     .map((pagina, idx) => {
-      const numero = idx + 2;
+      const numero = numeroInicial + idx;
       if (pagina.type === 'banner') {
         const frase = FRASES_DESTAQUE[(pagina.bannerIndex || 0) % FRASES_DESTAQUE.length];
         return `
@@ -369,40 +385,28 @@ async function filtrarProdutos(req) {
   return produtos;
 }
 
-async function gerarPdfBuffer(produtos) {
-  const produtosComImagem = produtos.map((p) => ({ ...p, img: p.imagem || SEM_IMAGEM_DATA_URL }));
-
-  const paginas = montarPaginas(produtosComImagem);
-  const html = gerarHTML(paginas, produtos.length);
-
-  let browser;
+// Renderiza um HTML (uma página do Chrome, com um lote de produtos) num
+// buffer de PDF, usando um browser já aberto. Cada chamada abre e fecha sua
+// própria página — fechar a página libera a memória das fotos que foram
+// carregadas nela antes do próximo lote começar.
+async function renderizarHTMLparaPDF(browser, html) {
+  const page = await browser.newPage();
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      protocolTimeout: 180000,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu'
-      ]
-    });
-    const page = await browser.newPage();
     page.on('pageerror', (err) => console.warn('Aviso: erro na página do PDF (ignorado):', err.message));
 
     // Só espera o HTML/CSS carregar aqui (rápido, não depende de rede
-    // externa) — NÃO usamos "networkidle0" porque, com centenas de fotos
+    // externa) — NÃO usamos "networkidle0" porque, com dezenas de fotos
     // (URLs externas) carregando ao mesmo tempo, basta UMA foto lenta ou
     // travada pra isso nunca "ficar ocioso" e estourar o timeout inteiro
     // (foi exatamente o que causou o "Navigation timeout exceeded" com o
-    // catálogo completo).
+    // catálogo completo, antes de existir a geração em lotes).
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Em vez disso, esperamos as fotos em paralelo com um limite de tempo
     // PRÓPRIO POR FOTO: cada uma tem até 8s pra carregar; a que não
     // conseguir simplesmente fica pra trás (o "onerror" no HTML já troca
     // pela imagem "sem imagem") sem travar as outras nem o restante da
-    // geração. Isso deixa o tempo total previsível mesmo com catálogos
+    // geração. Isso deixa o tempo total previsível mesmo com lotes
     // grandes, em vez de crescer junto com a quantidade de produtos.
     await page.evaluate(() => {
       const imagens = Array.from(document.images);
@@ -425,6 +429,63 @@ async function gerarPdfBuffer(produtos) {
 
     return await page.pdf({ format: 'A4', printBackground: true });
   } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+// Une vários PDFs (um por lote) num único PDF final, na ordem em que foram
+// gerados. Usa "pdf-lib" (não abre Chrome nenhum — só remonta as páginas já
+// prontas), então é rápido e usa pouquíssima memória mesmo com muitos lotes.
+async function juntarPdfs(buffers) {
+  if (buffers.length === 1) return buffers[0];
+  const final = await PDFDocument.create();
+  for (const buffer of buffers) {
+    const doc = await PDFDocument.load(buffer);
+    const paginas = await final.copyPages(doc, doc.getPageIndices());
+    paginas.forEach((pagina) => final.addPage(pagina));
+  }
+  return Buffer.from(await final.save());
+}
+
+async function gerarPdfBuffer(produtos) {
+  const produtosComImagem = produtos.map((p) => ({ ...p, img: p.imagem || SEM_IMAGEM_DATA_URL }));
+  const todasPaginas = montarPaginas(produtosComImagem);
+
+  // fatia a lista de páginas (não os produtos direto, porque os banners já
+  // entram intercalados) em lotes de até LOTE_PAGINAS_PDF páginas cada
+  const lotes = [];
+  for (let i = 0; i < todasPaginas.length; i += LOTE_PAGINAS_PDF) {
+    lotes.push(todasPaginas.slice(i, i + LOTE_PAGINAS_PDF));
+  }
+  if (lotes.length === 0) lotes.push([]); // catálogo sem produtos (só a capa)
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      protocolTimeout: 180000,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
+    });
+
+    const buffers = [];
+    let numeroAtual = 2;
+    for (let i = 0; i < lotes.length; i++) {
+      const lote = lotes[i];
+      const html = gerarHTML(lote, produtos.length, {
+        incluirCapa: i === 0,
+        numeroInicial: numeroAtual
+      });
+      numeroAtual += lote.length;
+      buffers.push(await renderizarHTMLparaPDF(browser, html));
+    }
+
+    return await juntarPdfs(buffers);
+  } finally {
     if (browser) {
       try {
         await browser.close();
@@ -442,8 +503,9 @@ async function gerarPdfBuffer(produtos) {
 
 function mensagemLimiteExcedido(produtos) {
   return (
-    `O catálogo filtrado tem ${produtos.length} produtos, e o limite seguro ` +
-    `para gerar de uma vez é ${MAX_PRODUTOS_POR_GERACAO} (acima disso o ` +
+    `O catálogo filtrado tem ${produtos.length} produtos — bem acima do que ` +
+    `esse catálogo costuma ter no total. Por segurança, o servidor gera no ` +
+    `máximo ${MAX_PRODUTOS_POR_GERACAO} produtos de uma vez (acima disso, o ` +
     `plano gratuito do servidor pode ficar sem memória e o site fica fora ` +
     `do ar por alguns instantes). Use a busca, ou escolha uma categoria ` +
     `ou marca específica no site, pra reduzir a quantidade antes de gerar.`
