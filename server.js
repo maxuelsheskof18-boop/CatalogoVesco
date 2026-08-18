@@ -38,22 +38,27 @@ const BANNER_EVERY_PAGES = 4;
 
 // Gerar o catálogo inteiro (centenas de produtos, cada um com foto) de uma
 // vez só, numa única página do Chrome headless, usa bastante memória — no
-// plano gratuito do Render (512 MB de RAM) isso podia estourar a memória e
-// derrubar o serviço inteiro ("502 Bad Gateway", sem mensagem de erro
-// clara). Por isso, catálogos grandes agora são gerados em LOTES (ver
-// LOTE_PAGINAS_PDF mais abaixo): cada lote vira um PDF separado, numa página
-// do Chrome que é fechada (liberando a memória das fotos) antes do lote
-// seguinte começar, e todos os PDFs são unidos no final. Isso mantém o uso
-// de memória baixo e estável não importa quantos produtos tenham no total.
-// MAX_PRODUTOS_POR_GERACAO continua existindo só como um teto de segurança
-// bem folgado, caso o catálogo cresça demais no futuro.
+// plano gratuito do Render (512 MB de RAM) isso estourava a memória e
+// derrubava o serviço inteiro ("502 Bad Gateway"/"Ran out of memory", sem
+// mensagem de erro clara). Por isso, catálogos grandes agora são gerados em
+// LOTES pequenos (ver LOTE_PAGINAS_PDF mais abaixo): cada lote abre e fecha
+// o PROCESSO INTEIRO do Chrome (não só a página) antes do lote seguinte
+// começar — fechar só a página não bastou, porque o Chrome não devolve toda
+// a memória pro sistema operacional enquanto o processo continua de pé.
+// Fechando o processo inteiro a cada lote, o sistema operacional recupera
+// essa memória de verdade antes do próximo lote começar. Todos os PDFs
+// parciais são unidos no final. MAX_PRODUTOS_POR_GERACAO continua existindo
+// só como um teto de segurança bem folgado, caso o catálogo cresça demais
+// no futuro.
 const MAX_PRODUTOS_POR_GERACAO = 2000;
 
 // Quantas "páginas" (cada uma com até ITEMS_PER_PAGE produtos) entram em
-// cada lote/PDF parcial. 15 páginas × 10 produtos = até 150 produtos com
-// foto carregados de uma vez no Chrome — um valor já testado como seguro no
-// plano gratuito do Render (o limite antigo, de geração única, era 200).
-const LOTE_PAGINAS_PDF = 15;
+// cada lote/PDF parcial. 8 páginas × 10 produtos = até 80 produtos com foto
+// carregados de uma vez no Chrome — bem mais conservador que o limite
+// antigo de geração única (200), porque mesmo o esquema em lotes anterior
+// (150 por lote, reaproveitando o mesmo Chrome aberto) ainda estourou a
+// memória do plano gratuito do Render.
+const LOTE_PAGINAS_PDF = 8;
 
 // Cache em memória do PDF/revista já gerados, por combinação de filtros
 // (busca + categoria + marca). É o que faz o botão ficar rápido depois da
@@ -404,13 +409,45 @@ async function filtrarProdutos(req) {
   return produtos;
 }
 
-// Renderiza um HTML (uma página do Chrome, com um lote de produtos) num
-// buffer de PDF, usando um browser já aberto. Cada chamada abre e fecha sua
-// própria página — fechar a página libera a memória das fotos que foram
-// carregadas nela antes do próximo lote começar.
-async function renderizarHTMLparaPDF(browser, html) {
-  const page = await browser.newPage();
+// Flags do Chrome headless pensadas pra usar o mínimo de memória possível —
+// desligam várias coisas que o Chrome normalmente carrega sozinho (contas
+// em segundo plano, extensões, telemetria, etc.) e que não servem pra nada
+// aqui, já que só usamos ele pra transformar HTML em PDF.
+const CHROME_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-breakpad',
+  '--disable-component-extensions-with-background-pages',
+  '--disable-default-apps',
+  '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+  '--disable-renderer-backgrounding',
+  '--disable-sync',
+  '--metrics-recording-only',
+  '--mute-audio',
+  '--no-first-run'
+];
+
+// Abre um Chrome novinho, renderiza um único lote (HTML já pronto, com até
+// LOTE_PAGINAS_PDF páginas) em PDF, salva o resultado direto num arquivo em
+// disco, e fecha o Chrome — o PROCESSO INTEIRO, não só a aba. É esse fechar
+// o processo inteiro (em vez de só a página) que garante que o sistema
+// operacional recupera de verdade a memória usada pelas fotos desse lote
+// antes do lote seguinte começar a carregar as dele.
+async function renderizarLoteParaArquivo(html, caminhoDestino) {
+  let browser;
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      protocolTimeout: 120000,
+      args: CHROME_ARGS
+    });
+    const page = await browser.newPage();
     page.on('pageerror', (err) => console.warn('Aviso: erro na página do PDF (ignorado):', err.message));
 
     // Só espera o HTML/CSS carregar aqui (rápido, não depende de rede
@@ -419,10 +456,10 @@ async function renderizarHTMLparaPDF(browser, html) {
     // travada pra isso nunca "ficar ocioso" e estourar o timeout inteiro
     // (foi exatamente o que causou o "Navigation timeout exceeded" com o
     // catálogo completo, antes de existir a geração em lotes). O timeout
-    // aqui é generoso (60s, não os 30s de antes) porque no plano gratuito
-    // do Render a CPU é compartilhada e o site "dorme" depois de 15 min sem
-    // uso — a primeira geração depois de um tempo parado pode ser bem mais
-    // lenta que o normal só pra ligar o Chrome headless.
+    // aqui é generoso (60s) porque no plano gratuito do Render a CPU é
+    // compartilhada e o site "dorme" depois de 15 min sem uso — a primeira
+    // geração depois de um tempo parado pode ser bem mais lenta que o
+    // normal só pra ligar o Chrome headless.
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     // Em vez disso, esperamos as fotos em paralelo com um limite de tempo
@@ -450,20 +487,34 @@ async function renderizarHTMLparaPDF(browser, html) {
       );
     });
 
-    return await page.pdf({ format: 'A4', printBackground: true });
+    const buffer = await page.pdf({ format: 'A4', printBackground: true });
+    await fs.writeFile(caminhoDestino, buffer);
   } finally {
-    await page.close().catch(() => {});
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (err) {
+        // No Windows o Chromium às vezes falha ao apagar a pasta temporária do
+        // perfil (arquivo bloqueado por antivírus/outro processo em segundo
+        // plano) mesmo depois do PDF já ter sido gerado com sucesso. Sem esse
+        // try/catch aqui, esse erro de limpeza "engolia" o PDF pronto e
+        // derrubava a geração inteira — por isso só avisamos no log e seguimos.
+        console.warn('Aviso: falha ao fechar o Chromium (ignorado):', err.message);
+      }
+    }
   }
 }
 
-// Une vários PDFs (um por lote) num único PDF final, na ordem em que foram
-// gerados. Usa "pdf-lib" (não abre Chrome nenhum — só remonta as páginas já
-// prontas), então é rápido e usa pouquíssima memória mesmo com muitos lotes.
-async function juntarPdfs(buffers) {
-  if (buffers.length === 1) return buffers[0];
+// Une vários PDFs (um arquivo por lote, já salvos em disco) num único PDF
+// final, na ordem em que foram gerados. Usa "pdf-lib" (não abre Chrome
+// nenhum — só remonta as páginas já prontas) e lê um arquivo de cada vez,
+// então usa pouquíssima memória mesmo com muitos lotes.
+async function juntarPdfsDeArquivos(caminhos) {
+  if (caminhos.length === 1) return fs.readFile(caminhos[0]);
   const final = await PDFDocument.create();
-  for (const buffer of buffers) {
-    const doc = await PDFDocument.load(buffer);
+  for (const caminho of caminhos) {
+    const bytes = await fs.readFile(caminho);
+    const doc = await PDFDocument.load(bytes);
     const paginas = await final.copyPages(doc, doc.getPageIndices());
     paginas.forEach((pagina) => final.addPage(pagina));
   }
@@ -482,20 +533,14 @@ async function gerarPdfBuffer(produtos) {
   }
   if (lotes.length === 0) lotes.push([]); // catálogo sem produtos (só a capa)
 
-  let browser;
-  try {
-    browser = await puppeteer.launch({
-      headless: true,
-      protocolTimeout: 180000,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu'
-      ]
-    });
+  await fs.mkdir(TMP_DIR, { recursive: true });
 
-    const buffers = [];
+  // Cada lote é renderizado por um processo do Chrome NOVO (ver
+  // renderizarLoteParaArquivo acima) e salvo direto num arquivo temporário
+  // em disco — nunca ficamos com vários PDFs inteiros abertos ao mesmo
+  // tempo na memória do Node, só o arquivo de cada lote por vez.
+  const caminhosLotes = [];
+  try {
     let numeroAtual = 2;
     for (let i = 0; i < lotes.length; i++) {
       const lote = lotes[i];
@@ -504,23 +549,22 @@ async function gerarPdfBuffer(produtos) {
         numeroInicial: numeroAtual
       });
       numeroAtual += lote.length;
-      buffers.push(await renderizarHTMLparaPDF(browser, html));
+
+      const nomeLote = `lote-${crypto.randomBytes(8).toString('hex')}.pdf`;
+      const caminhoLote = path.join(TMP_DIR, nomeLote);
+      await renderizarLoteParaArquivo(html, caminhoLote);
+      caminhosLotes.push(caminhoLote);
     }
 
-    return await juntarPdfs(buffers);
+    return await juntarPdfsDeArquivos(caminhosLotes);
   } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (err) {
-        // No Windows o Chromium às vezes falha ao apagar a pasta temporária do
-        // perfil (arquivo bloqueado por antivírus/outro processo em segundo
-        // plano) mesmo depois do PDF já ter sido gerado com sucesso. Sem esse
-        // try/catch aqui, esse erro de limpeza "engolia" o PDF pronto e
-        // derrubava a geração inteira — por isso só avisamos no log e seguimos.
-        console.warn('Aviso: falha ao fechar o Chromium (ignorado):', err.message);
-      }
-    }
+    // Limpa todos os arquivos temporários de lote, mesmo se algo deu
+    // errado no meio do caminho — não deixa lixo acumulando em disco.
+    await Promise.all(
+      caminhosLotes.map((caminho) =>
+        fs.unlink(caminho).catch(() => {})
+      )
+    );
   }
 }
 
