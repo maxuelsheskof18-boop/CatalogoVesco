@@ -79,6 +79,33 @@ adicione manualmente em **Environment**:
 Depois disso, rode outro **Manual Deploy** → **Clear build cache & deploy**
 (de novo com cache limpo, pra descartar a instalação corrompida anterior).
 
+## Publicando em outras hospedagens (Hostinger, cPanel, etc.)
+
+Hospedagens com painel próprio de Node.js (hPanel da Hostinger, cPanel com
+Node.js Selector, e parecidos) normalmente não têm um campo de "Build
+Command" como o Render — elas só rodam `npm install` sozinho depois do
+deploy. Por isso, o `package.json` já vem com um script `postinstall` que
+roda automaticamente logo depois do `npm install`, em qualquer hospedagem,
+e baixa o Chrome que o Puppeteer precisa — sem precisar configurar nada a
+mais no painel.
+
+**Se mesmo assim os botões de PDF/revista digital derem erro de "Could not
+find Chrome"** (aparece nos logs de execução do site, mencionando "you did
+not perform an installation" ou "your cache path is incorrectly
+configured"): normalmente é porque esse tipo de hospedagem compartilhada
+bloqueia scripts de pós-instalação por segurança (então o `postinstall`
+acima nem chega a rodar). Nesse caso:
+
+1. Veja se o painel oferece algum "Terminal" ou acesso SSH pra essa
+   aplicação Node.js — se tiver, rode manualmente, na pasta do projeto:
+   `npx puppeteer browsers install chrome`
+2. Se não tiver terminal disponível, esse tipo de hospedagem compartilhada
+   pode simplesmente não suportar o Puppeteer (ele precisa conseguir abrir
+   um processo de navegador de verdade por trás — muitos planos
+   compartilhados não permitem isso). Nesse caso, a alternativa mais
+   simples é publicar no Render (veja as instruções acima), que já vem
+   testado e funcionando com este projeto.
+
 ## Limite de produtos por geração (plano gratuito)
 
 Gerar o PDF ou a revista digital usa o Chrome de verdade rodando por trás —
