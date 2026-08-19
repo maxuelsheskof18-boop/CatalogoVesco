@@ -227,6 +227,16 @@ function categoriaSimplesDoCaminho(bruta) {
   return partes.length ? partes[partes.length - 1] : '';
 }
 
+// Marcação manual de "mais vendido": lê a coluna "destaque" da planilha
+// (crie essa coluna e escreva "sim" nas linhas dos produtos que quer
+// destacar — deixe em branco nas demais). Aceita algumas variações comuns
+// de como alguém digitaria "sim" numa planilha, pra não depender de
+// escrever exatamente igual toda vez.
+const VALORES_SIM = ['sim', 's', 'true', 'verdadeiro', '1', 'x', 'yes'];
+function ehSimNao(valor) {
+  return VALORES_SIM.includes(normalizarTextoCategoria(valor).trim());
+}
+
 function normalizarProduto(p) {
   const imagemBruta = (p.imagem || '').trim();
   const imagemValida = imagemBruta.startsWith('http') ? imagemBruta : '';
@@ -240,7 +250,8 @@ function normalizarProduto(p) {
     venda: p.venda || '',
     imagem: imagemValida,
     gtin: p.gtin || '',
-    id: p.id || ''
+    id: p.id || '',
+    destaque: ehSimNao(p.destaque)
   };
 }
 

@@ -134,6 +134,15 @@ Se um dia precisar apontar para outra planilha, defina a variável de
 ambiente `OPEN_SHEET_URL` (no Render: aba **Environment**) com o link no
 formato `https://opensheet.elk.sh/ID_DA_PLANILHA/NomeDaAba`.
 
+### Marcando produtos como "Mais vendido"
+
+Pra um produto aparecer com o selo "Mais vendido" no site e subir pro topo
+da lista quando alguém escolher "Mais vendidos" no filtro de ordenação,
+crie (ou já use, se existir) uma coluna chamada **destaque** na planilha, e
+escreva **sim** nas linhas dos produtos que você quer destacar (deixe em
+branco nas demais). Não precisa reiniciar nada — assim que a planilha
+atualiza, o site reflete a mudança (o cache de 1 minuto mencionado acima).
+
 ## Botão "Baixar catálogo em PDF"
 
 Gera um PDF formatado (capa, produtos com foto, preço, código, banners) na
