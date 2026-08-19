@@ -6,7 +6,10 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const crypto = require('crypto');
+const util = require('util');
+const execFileAsync = util.promisify(require('child_process').execFile);
 const puppeteer = require('puppeteer');
 const { PDFDocument } = require('pdf-lib');
 
@@ -489,6 +492,64 @@ const CHROME_ARGS = [
   '--no-first-run'
 ];
 
+// Algumas hospedagens compartilhadas (Hostinger/hPanel entre elas) bloqueiam
+// o script "postinstall" do package.json por segurança — nesse caso o Chrome
+// que o Puppeteer precisa pra gerar PDF nunca chega a ser baixado durante o
+// deploy, e os botões de PDF/revista digital falham com "Could not find
+// Chrome". Em vez de depender só do postinstall, o servidor confere sozinho
+// se o Chrome existe assim que sobe (e de novo, como segurança extra, antes
+// de cada geração) — se não existir, baixa ele mesmo aqui, sem precisar de
+// terminal/SSH nenhum no painel da hospedagem.
+function chromeJaInstalado() {
+  try {
+    return fsSync.existsSync(puppeteer.executablePath());
+  } catch {
+    return false;
+  }
+}
+
+let promessaChromeInstalado = null;
+function garantirChromeInstalado() {
+  if (chromeJaInstalado()) return Promise.resolve();
+  if (!promessaChromeInstalado) {
+    promessaChromeInstalado = (async () => {
+      try {
+        console.log('Chrome do Puppeteer não encontrado — baixando automaticamente (pode levar 1 minuto)...');
+        await execFileAsync('npx', ['puppeteer', 'browsers', 'install', 'chrome'], {
+          cwd: __dirname,
+          maxBuffer: 1024 * 1024 * 20
+        });
+        console.log('Chrome baixado com sucesso.');
+      } catch (erro) {
+        console.error('Não foi possível baixar o Chrome automaticamente:', erro.message);
+      } finally {
+        // Libera a "trava": se ainda faltar, a próxima geração tenta de novo
+        // (em vez de ficar presa num erro antigo pra sempre).
+        promessaChromeInstalado = null;
+      }
+    })();
+  }
+  return promessaChromeInstalado;
+}
+
+// Camada extra de segurança em cima do "garantirChromeInstalado": mesmo que
+// a checagem tenha dito que o Chrome existe, tenta abrir e, se ainda assim
+// vier o erro específico de "Could not find Chrome", força uma reinstalação
+// e tenta abrir de novo (só essa uma vez, pra não entrar em loop).
+async function lancarChromeComAutoInstalacao(opcoes) {
+  try {
+    return await puppeteer.launch(opcoes);
+  } catch (erro) {
+    if (String(erro.message || '').includes('Could not find Chrome')) {
+      console.warn('Chrome sumiu/não instalado — tentando reinstalar antes de desistir...');
+      promessaChromeInstalado = null;
+      await garantirChromeInstalado();
+      return await puppeteer.launch(opcoes);
+    }
+    throw erro;
+  }
+}
+
 // Abre um Chrome novinho, renderiza um único lote (HTML já pronto, com até
 // LOTE_PAGINAS_PDF páginas) em PDF, salva o resultado direto num arquivo em
 // disco, e fecha o Chrome — o PROCESSO INTEIRO, não só a aba. É esse fechar
@@ -496,9 +557,10 @@ const CHROME_ARGS = [
 // operacional recupera de verdade a memória usada pelas fotos desse lote
 // antes do lote seguinte começar a carregar as dele.
 async function renderizarLoteParaArquivo(html, caminhoDestino) {
+  await garantirChromeInstalado();
   let browser;
   try {
-    browser = await puppeteer.launch({
+    browser = await lancarChromeComAutoInstalacao({
       headless: true,
       // O Puppeteer, por padrão, só espera 30s o Chrome terminar de abrir
       // (timeout do launch em si — diferente do protocolTimeout abaixo, que
@@ -830,6 +892,7 @@ async function preAquecerCacheCompleto() {
 // Renova o cache um pouco antes dele vencer (PDF_CACHE_TTL_MS = 2h), pra um
 // visitante nunca pegar o cache expirado e ter que esperar a geração do zero.
 const PRE_AQUECER_INTERVALO_MS = 100 * 60 * 1000; // 100 minutos
+garantirChromeInstalado(); // confere/baixa o Chrome em segundo plano assim que o servidor sobe
 setTimeout(preAquecerCacheCompleto, 5000); // espera o servidor terminar de subir
 setInterval(preAquecerCacheCompleto, PRE_AQUECER_INTERVALO_MS);
 

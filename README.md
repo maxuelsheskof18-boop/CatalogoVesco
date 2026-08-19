@@ -94,17 +94,29 @@ find Chrome"** (aparece nos logs de execução do site, mencionando "you did
 not perform an installation" ou "your cache path is incorrectly
 configured"): normalmente é porque esse tipo de hospedagem compartilhada
 bloqueia scripts de pós-instalação por segurança (então o `postinstall`
-acima nem chega a rodar). Nesse caso:
+acima nem chega a rodar). Pra não depender só disso, o próprio servidor
+agora confere sozinho se o Chrome existe assim que sobe (e de novo antes de
+cada geração, como segurança extra) — se não existir, ele baixa
+automaticamente, sem precisar de terminal/SSH nem de mexer em nada no
+painel. Isso acontece em segundo plano, então:
 
-1. Veja se o painel oferece algum "Terminal" ou acesso SSH pra essa
-   aplicação Node.js — se tiver, rode manualmente, na pasta do projeto:
-   `npx puppeteer browsers install chrome`
-2. Se não tiver terminal disponível, esse tipo de hospedagem compartilhada
-   pode simplesmente não suportar o Puppeteer (ele precisa conseguir abrir
-   um processo de navegador de verdade por trás — muitos planos
-   compartilhados não permitem isso). Nesse caso, a alternativa mais
-   simples é publicar no Render (veja as instruções acima), que já vem
-   testado e funcionando com este projeto.
+1. Depois de publicar (ou de qualquer reinício do site), espere uns 2
+   minutos antes de testar os botões de PDF/revista digital pela primeira
+   vez — é o tempo que o download automático do Chrome leva na primeira
+   vez. Nas próximas vezes já fica pronto na hora.
+2. Se depois desse tempo ainda dor erro, veja os logs de execução do site
+   no painel — deve aparecer uma mensagem tipo "Chrome do Puppeteer não
+   encontrado — baixando automaticamente..." seguida de sucesso ou de um
+   motivo de erro (ex.: sem espaço em disco, sem acesso à internet de
+   saída). Se o painel oferecer "Terminal" ou acesso SSH, também dá pra
+   rodar manualmente, na pasta do projeto: `npx puppeteer browsers install
+   chrome`
+3. Se nada disso resolver, esse tipo de hospedagem compartilhada pode
+   simplesmente não suportar o Puppeteer (ele precisa conseguir abrir um
+   processo de navegador de verdade por trás — alguns planos muito
+   restritos não permitem isso). Nesse caso, a alternativa mais simples é
+   publicar no Render (veja as instruções acima), que já vem testado e
+   funcionando com este projeto.
 
 ## Limite de produtos por geração (plano gratuito)
 
