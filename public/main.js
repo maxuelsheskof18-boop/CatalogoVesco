@@ -19,8 +19,22 @@
     gradeMobile: document.getElementById('gradeMobile'),
     contador: document.getElementById('contadorPagina'),
     btnAnterior: document.getElementById('btnAnterior'),
-    btnProximo: document.getElementById('btnProximo')
+    btnProximo: document.getElementById('btnProximo'),
+    btnCarrinho: document.getElementById('btnCarrinho'),
+    carrinhoContador: document.getElementById('carrinhoContador'),
+    carrinhoOverlay: document.getElementById('carrinhoOverlay'),
+    carrinhoLista: document.getElementById('carrinhoLista'),
+    carrinhoTotal: document.getElementById('carrinhoTotal'),
+    btnFecharCarrinho: document.getElementById('btnFecharCarrinho'),
+    btnEsvaziarCarrinho: document.getElementById('btnEsvaziarCarrinho'),
+    btnCarrinhoWhatsapp: document.getElementById('btnCarrinhoWhatsapp'),
+    btnCarrinhoPdf: document.getElementById('btnCarrinhoPdf')
   };
+
+  // Número de WhatsApp que recebe os pedidos do carrinho (formato
+  // internacional, só dígitos, sem "+"). Pra trocar, é só editar essa
+  // linha — o mesmo número que já aparece na contracapa do PDF.
+  const WHATSAPP_NUMERO = '5511989433272';
 
   let todosProdutos = [];
   let debounceTimer = null;
@@ -243,6 +257,7 @@
   function cartaoProdutoHTML(p) {
     const img = p.imagem || '/sem-imagem.svg';
     const nome = escapeHtml(p.produto || '');
+    const codigo = escapeHtml(p.codigo || '');
     const selo = p.destaque ? '<span class="produto-selo">Mais vendido</span>' : '';
     return `
       <article class="produto-card">
@@ -251,9 +266,10 @@
         <div class="produto-info">
           <div class="produto-marca">${escapeHtml(p.marca || 'Vesco')}</div>
           <div class="produto-nome">${nome}</div>
-          <div class="produto-cod">Cód: ${escapeHtml(p.codigo || '—')}</div>
+          <div class="produto-cod">Cód: ${codigo || '—'}</div>
           <div class="produto-preco">${formatarPreco(p.venda)}</div>
         </div>
+        <button class="produto-add-carrinho" type="button" data-codigo="${codigo}" aria-label="Adicionar ${nome} ao carrinho">+</button>
       </article>`;
   }
 
@@ -424,6 +440,230 @@
       }
     }, { passive: true });
   })();
+
+  // ---------------------------------------------------------------
+  // Carrinho de orçamento — junta produtos pra mandar no WhatsApp ou
+  // gerar um PDF só com eles (com quantidade e subtotal de cada um).
+  // Guardado no localStorage do navegador (por aparelho/navegador, não
+  // sincroniza entre dispositivos — não precisa de login nem servidor).
+  // ---------------------------------------------------------------
+  const CARRINHO_STORAGE_KEY = 'vesco-carrinho';
+  let carrinho = carregarCarrinho();
+
+  function carregarCarrinho() {
+    try {
+      const bruto = JSON.parse(localStorage.getItem(CARRINHO_STORAGE_KEY) || '{}');
+      return bruto && typeof bruto === 'object' ? bruto : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function salvarCarrinho() {
+    try {
+      localStorage.setItem(CARRINHO_STORAGE_KEY, JSON.stringify(carrinho));
+    } catch {
+      // localStorage indisponível (modo privado, cookies bloqueados etc.) —
+      // o carrinho continua funcionando normalmente durante a visita, só
+      // não é lembrado na próxima vez.
+    }
+  }
+
+  function itensCarrinhoDetalhados() {
+    return Object.keys(carrinho)
+      .map((codigo) => {
+        const produto = todosProdutos.find((p) => String(p.codigo) === codigo);
+        if (!produto) return null;
+        const quantidade = carrinho[codigo];
+        const precoUnit = precoNumerico(produto);
+        const subtotal = precoUnit === null ? null : precoUnit * quantidade;
+        return { produto, quantidade, precoUnit, subtotal };
+      })
+      .filter(Boolean);
+  }
+
+  function totalCarrinho(itens) {
+    return itens.reduce((soma, it) => soma + (it.subtotal || 0), 0);
+  }
+
+  function atualizarContadorCarrinho() {
+    const total = Object.values(carrinho).reduce((soma, q) => soma + q, 0);
+    el.carrinhoContador.textContent = String(total);
+    el.carrinhoContador.hidden = total === 0;
+  }
+
+  function adicionarAoCarrinho(codigo) {
+    if (!codigo) return;
+    carrinho[codigo] = (carrinho[codigo] || 0) + 1;
+    salvarCarrinho();
+    atualizarContadorCarrinho();
+    mostrarToast('Adicionado ao carrinho');
+    if (!el.carrinhoOverlay.hidden) renderizarCarrinho();
+  }
+
+  function alterarQuantidadeCarrinho(codigo, delta) {
+    if (!carrinho[codigo]) return;
+    carrinho[codigo] += delta;
+    if (carrinho[codigo] <= 0) delete carrinho[codigo];
+    salvarCarrinho();
+    atualizarContadorCarrinho();
+    renderizarCarrinho();
+  }
+
+  function removerDoCarrinho(codigo) {
+    delete carrinho[codigo];
+    salvarCarrinho();
+    atualizarContadorCarrinho();
+    renderizarCarrinho();
+  }
+
+  function esvaziarCarrinho() {
+    carrinho = {};
+    salvarCarrinho();
+    atualizarContadorCarrinho();
+    renderizarCarrinho();
+  }
+
+  function carrinhoItemHTML(it) {
+    const img = it.produto.imagem || '/sem-imagem.svg';
+    const nome = escapeHtml(it.produto.produto || '');
+    const codigo = escapeHtml(it.produto.codigo || '');
+    const subtotalTexto = it.subtotal === null ? 'Consulte' : formatarPreco(it.subtotal);
+    return `
+      <div class="carrinho-item" data-codigo="${codigo}">
+        <img src="${img}" alt="${nome}" onerror="this.src='/sem-imagem.svg'"/>
+        <div class="carrinho-item-info">
+          <div class="carrinho-item-nome">${nome}</div>
+          <div class="carrinho-item-preco">${formatarPreco(it.produto.venda)} cada</div>
+          <div class="carrinho-item-controles">
+            <span class="carrinho-item-qtd">
+              <button type="button" class="carrinho-diminuir" aria-label="Diminuir quantidade">−</button>
+              <span>${it.quantidade}</span>
+              <button type="button" class="carrinho-aumentar" aria-label="Aumentar quantidade">+</button>
+            </span>
+            <button type="button" class="carrinho-item-remover">remover</button>
+          </div>
+        </div>
+        <div class="carrinho-item-subtotal">${subtotalTexto}</div>
+      </div>`;
+  }
+
+  function renderizarCarrinho() {
+    const itens = itensCarrinhoDetalhados();
+    if (itens.length === 0) {
+      el.carrinhoLista.innerHTML = '<div class="carrinho-vazio">Seu carrinho está vazio. Clique no "+" de um produto pra adicionar.</div>';
+    } else {
+      el.carrinhoLista.innerHTML = itens.map(carrinhoItemHTML).join('');
+    }
+    el.carrinhoTotal.textContent = formatarPreco(totalCarrinho(itens));
+    el.btnCarrinhoWhatsapp.disabled = itens.length === 0;
+    el.btnCarrinhoPdf.disabled = itens.length === 0;
+  }
+
+  function abrirCarrinho() {
+    renderizarCarrinho();
+    el.carrinhoOverlay.hidden = false;
+  }
+
+  function fecharCarrinho() {
+    el.carrinhoOverlay.hidden = true;
+  }
+
+  function montarMensagemWhatsApp(itens, total) {
+    const linhas = itens.map((it) => {
+      const preco = it.subtotal === null ? 'consulte o preço' : formatarPreco(it.subtotal);
+      return `• ${it.quantidade}x ${it.produto.produto} — ${preco}`;
+    });
+    return (
+      'Olá! Gostaria de fazer um orçamento com os seguintes produtos:\n\n' +
+      linhas.join('\n') +
+      `\n\nTotal: ${formatarPreco(total)}`
+    );
+  }
+
+  async function baixarPdfCarrinho() {
+    const itens = itensCarrinhoDetalhados();
+    if (itens.length === 0) return;
+    el.btnCarrinhoPdf.disabled = true;
+    const textoOriginal = el.btnCarrinhoPdf.textContent;
+    el.btnCarrinhoPdf.textContent = 'Gerando...';
+    try {
+      const resp = await fetch('/gerar-pdf-carrinho', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itens: itens.map((it) => ({ codigo: it.produto.codigo, quantidade: it.quantidade }))
+        })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'orcamento-vesco.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível gerar o PDF do carrinho agora. Tente novamente em instantes.');
+    } finally {
+      el.btnCarrinhoPdf.disabled = itensCarrinhoDetalhados().length === 0;
+      el.btnCarrinhoPdf.textContent = textoOriginal;
+    }
+  }
+
+  let toastTimer = null;
+  function mostrarToast(mensagem) {
+    let toast = document.querySelector('.toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.className = 'toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = mensagem;
+    toast.classList.remove('toast-saindo');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toast.classList.add('toast-saindo');
+      setTimeout(() => toast.remove(), 320);
+    }, 1600);
+  }
+
+  // Um clique só, "delegado" no livro inteiro — os cards são recriados a
+  // cada página/filtro, então prender um listener em cada botão "+"
+  // individualmente não funcionaria depois da primeira renderização.
+  el.livro.addEventListener('click', (e) => {
+    const botao = e.target.closest('.produto-add-carrinho');
+    if (botao) adicionarAoCarrinho(botao.dataset.codigo);
+  });
+
+  el.btnCarrinho.addEventListener('click', abrirCarrinho);
+  el.btnFecharCarrinho.addEventListener('click', fecharCarrinho);
+  el.carrinhoOverlay.addEventListener('click', (e) => {
+    if (e.target === el.carrinhoOverlay) fecharCarrinho();
+  });
+  el.btnEsvaziarCarrinho.addEventListener('click', () => {
+    if (confirm('Esvaziar o carrinho?')) esvaziarCarrinho();
+  });
+  el.carrinhoLista.addEventListener('click', (e) => {
+    const item = e.target.closest('.carrinho-item');
+    if (!item) return;
+    const codigo = item.dataset.codigo;
+    if (e.target.closest('.carrinho-aumentar')) alterarQuantidadeCarrinho(codigo, 1);
+    else if (e.target.closest('.carrinho-diminuir')) alterarQuantidadeCarrinho(codigo, -1);
+    else if (e.target.closest('.carrinho-item-remover')) removerDoCarrinho(codigo);
+  });
+  el.btnCarrinhoWhatsapp.addEventListener('click', () => {
+    const itens = itensCarrinhoDetalhados();
+    if (itens.length === 0) return;
+    const mensagem = montarMensagemWhatsApp(itens, totalCarrinho(itens));
+    window.open(`https://wa.me/${WHATSAPP_NUMERO}?text=${encodeURIComponent(mensagem)}`, '_blank');
+  });
+  el.btnCarrinhoPdf.addEventListener('click', baixarPdfCarrinho);
+
+  atualizarContadorCarrinho();
 
   el.busca.addEventListener('input', () => {
     clearTimeout(debounceTimer);

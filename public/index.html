@@ -32,6 +32,11 @@
     </div>
 
     <div class="topo-acoes">
+      <button id="btnCarrinho" class="botao-carrinho" type="button">
+        <span>🛒 Carrinho</span>
+        <span id="carrinhoContador" class="carrinho-contador" hidden>0</span>
+      </button>
+
       <a id="btnVerRevista" class="botao-baixar botao-secundario" href="/gerar-flipbook" target="_blank" rel="noopener">
         <span>Ver como revista online</span>
       </a>
@@ -41,6 +46,30 @@
       </a>
     </div>
   </header>
+
+  <!-- painel do carrinho de orçamento — fica escondido até clicar em
+       "Carrinho"; o conteúdo de dentro (lista de itens, total) é montado
+       inteiramente pelo main.js (ver renderizarCarrinho). -->
+  <div id="carrinhoOverlay" class="carrinho-overlay" hidden>
+    <div class="carrinho-painel" role="dialog" aria-label="Carrinho de orçamento">
+      <div class="carrinho-cabecalho">
+        <h2>Seu carrinho</h2>
+        <button id="btnFecharCarrinho" class="carrinho-fechar" type="button" aria-label="Fechar carrinho">×</button>
+      </div>
+      <div id="carrinhoLista" class="carrinho-lista"></div>
+      <div class="carrinho-rodape">
+        <button id="btnEsvaziarCarrinho" class="carrinho-esvaziar" type="button">Esvaziar carrinho</button>
+        <div class="carrinho-total">
+          <span>Total</span>
+          <strong id="carrinhoTotal">R$ 0,00</strong>
+        </div>
+        <div class="carrinho-acoes">
+          <button id="btnCarrinhoWhatsapp" class="botao-whatsapp" type="button" disabled>Enviar no WhatsApp</button>
+          <button id="btnCarrinhoPdf" class="botao-pdf-carrinho" type="button" disabled>Gerar PDF do carrinho</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <main>
     <div id="statusCarregando" class="status">Carregando catálogo…</div>
