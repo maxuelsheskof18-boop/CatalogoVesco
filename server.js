@@ -341,7 +341,8 @@ app.get('/debug-chrome', async (req, res) => {
       await garantirChromeInstalado();
       info.resultadoTentativaAgora = chromeJaInstalado()
         ? 'Chrome instalado com sucesso agora.'
-        : 'A tentativa rodou mas o Chrome ainda não foi encontrado depois — provavelmente falhou por algum motivo (rede, permissão, espaço em disco). Confira os logs de execução do servidor pra ver a mensagem de erro completa, registrada logo antes desta requisição.';
+        : 'A tentativa rodou mas o Chrome ainda não foi encontrado depois.';
+      info.erroDaTentativa = ultimoErroInstalacaoChrome;
     } catch (erro) {
       info.resultadoTentativaAgora = 'Erro: ' + erro.message;
     }
@@ -715,6 +716,13 @@ function caminhoDoNpx() {
   return fsSync.existsSync(candidato) ? candidato : 'npx';
 }
 
+// Guarda o erro mais recente da instalação automática (se der errado) —
+// além de ir pro log do servidor, a rota /debug-chrome devolve esse texto
+// direto na resposta, porque em hospedagens sem acesso fácil aos logs de
+// execução (como vem sendo o caso na Hostinger) essa é a única forma de
+// ver o motivo real sem precisar de terminal/SSH.
+let ultimoErroInstalacaoChrome = null;
+
 let promessaChromeInstalado = null;
 function garantirChromeInstalado() {
   if (chromeJaInstalado()) return Promise.resolve();
@@ -724,18 +732,22 @@ function garantirChromeInstalado() {
         console.log('Chrome do Puppeteer não encontrado — baixando automaticamente (pode levar 1 minuto)...');
         await execFileAsync(caminhoDoNpx(), ['puppeteer', 'browsers', 'install', 'chrome'], {
           cwd: __dirname,
-          maxBuffer: 1024 * 1024 * 20
+          maxBuffer: 1024 * 1024 * 20,
+          timeout: 120000
         });
         console.log('Chrome baixado com sucesso.');
+        ultimoErroInstalacaoChrome = null;
       } catch (erro) {
         // Loga o máximo de detalhe possível (código do erro, ex.: "ENOENT"
-        // quando o comando nem foi encontrado) — como não temos acesso
-        // direto aos logs de execução da hospedagem, essa mensagem é a
-        // única pista disponível se isso continuar falhando.
-        console.error(
-          'Não foi possível baixar o Chrome automaticamente:',
-          erro.code || '', erro.message
-        );
+        // quando o comando nem foi encontrado; "ETIMEDOUT"/"ECONNREFUSED"
+        // quando é a rede que está bloqueando o download) — como não temos
+        // acesso direto aos logs de execução da hospedagem, essa mensagem é
+        // a única pista disponível se isso continuar falhando.
+        ultimoErroInstalacaoChrome =
+          (erro.code ? '[' + erro.code + '] ' : '') +
+          erro.message +
+          (erro.stderr ? ' | stderr: ' + String(erro.stderr).slice(0, 500) : '');
+        console.error('Não foi possível baixar o Chrome automaticamente:', ultimoErroInstalacaoChrome);
       } finally {
         // Libera a "trava": se ainda faltar, a próxima geração tenta de novo
         // (em vez de ficar presa num erro antigo pra sempre).
