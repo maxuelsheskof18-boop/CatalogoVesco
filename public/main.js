@@ -8,6 +8,7 @@
     busca: document.getElementById('busca'),
     categoria: document.getElementById('categoria'),
     marca: document.getElementById('marca'),
+    ordenar: document.getElementById('ordenar'),
     btnBaixarPdf: document.getElementById('btnBaixarPdf'),
     btnVerRevista: document.getElementById('btnVerRevista'),
     statusCarregando: document.getElementById('statusCarregando'),
@@ -84,10 +85,21 @@
     });
   }
 
+  // Preço em número puro pra poder comparar/ordenar (a mesma lógica de
+  // "sem preço = Consulte" usada em formatarPreco). Produtos sem preço
+  // (ou preço zerado) voltam "null" aqui, pra sempre irem pro final da
+  // lista quando ordenado por preço — nunca aparecem misturados no meio,
+  // nem no topo, dos "menor/maior preço".
+  function precoNumerico(p) {
+    const num = Number(String(p.venda || '').replace(',', '.').replace(/[^\d.-]/g, ''));
+    return Number.isFinite(num) && num > 0 ? num : null;
+  }
+
   function produtosFiltrados() {
     const termo = normalizarTexto(el.busca.value);
     const categoria = el.categoria.value;
     const marca = el.marca ? el.marca.value : '';
+    const ordenar = el.ordenar ? el.ordenar.value : '';
 
     let lista = todosProdutos;
     if (categoria) {
@@ -103,6 +115,32 @@
         return palavras.every((palavra) => texto.includes(palavra));
       });
     }
+
+    if (ordenar === 'menor-preco' || ordenar === 'maior-preco') {
+      const direcao = ordenar === 'menor-preco' ? 1 : -1;
+      return lista.slice().sort((a, b) => {
+        const pa = precoNumerico(a);
+        const pb = precoNumerico(b);
+        if (pa === null && pb === null) return (a.produto || '').localeCompare(b.produto || '', 'pt-BR');
+        if (pa === null) return 1; // sem preço sempre vai pro final
+        if (pb === null) return -1;
+        return (pa - pb) * direcao;
+      });
+    }
+
+    // "Mais vendidos" depende de uma marcação manual na planilha (coluna
+    // "destaque" = "sim" nos produtos que você quer destacar) — ver
+    // normalizarProduto no server.js. Os marcados vêm primeiro; dentro de
+    // cada grupo (marcados / não marcados), continua em ordem alfabética.
+    if (ordenar === 'mais-vendidos') {
+      return lista.slice().sort((a, b) => {
+        const da = a.destaque ? 1 : 0;
+        const db = b.destaque ? 1 : 0;
+        if (da !== db) return db - da;
+        return (a.produto || '').localeCompare(b.produto || '', 'pt-BR');
+      });
+    }
+
     return lista.slice().sort((a, b) => (a.produto || '').localeCompare(b.produto || '', 'pt-BR'));
   }
 
@@ -130,18 +168,23 @@
     { titulo: 'Limpeza que também é cuidado', texto: 'Cada produto Vesco carrega o compromisso de proteger pessoas e espaços com qualidade de verdade.' }
   ];
 
-  function montarPaginasHTML(produtos) {
+  // incluirCapa = false quando tem uma busca/filtro ativo: nesse caso não
+  // faz sentido mostrar a capa do catálogo primeiro (quem buscou já quer
+  // ver o resultado direto) — a revista já abre direto na primeira página
+  // com produto.
+  function montarPaginasHTML(produtos, incluirCapa) {
     const paginasProdutos = [];
     for (let i = 0; i < produtos.length; i += ITEMS_PER_PAGE) {
       paginasProdutos.push(produtos.slice(i, i + ITEMS_PER_PAGE));
     }
 
     const paginas = [];
-    paginas.push(paginaCapa());
+    if (incluirCapa) paginas.push(paginaCapa());
 
+    const numeroInicial = incluirCapa ? 2 : 1;
     let contadorDestaque = 0;
     paginasProdutos.forEach((itens, idx) => {
-      paginas.push(paginaProdutos(itens, idx + 2));
+      paginas.push(paginaProdutos(itens, numeroInicial + idx));
       if ((idx + 1) % BANNER_EVERY_PAGES === 0 && idx !== paginasProdutos.length - 1) {
         paginas.push(paginaBanner(contadorDestaque));
         contadorDestaque += 1;
@@ -200,8 +243,10 @@
   function cartaoProdutoHTML(p) {
     const img = p.imagem || '/sem-imagem.svg';
     const nome = escapeHtml(p.produto || '');
+    const selo = p.destaque ? '<span class="produto-selo">Mais vendido</span>' : '';
     return `
       <article class="produto-card">
+        ${selo}
         <img src="${img}" alt="${nome}" loading="lazy" onerror="this.src='/sem-imagem.svg'"/>
         <div class="produto-info">
           <div class="produto-marca">${escapeHtml(p.marca || 'Vesco')}</div>
@@ -232,8 +277,19 @@
     const contadorH = (el.contador && !el.contador.hidden)
       ? el.contador.getBoundingClientRect().height + 14
       : 0;
+    // No celular as setas de navegação ficam ABAIXO do livro, não mais do
+    // lado (ver o breakpoint de 640px no style.css) — isso ocupa uma
+    // faixa extra de altura que precisa ser descontada aqui também,
+    // senão o livro fica grande demais e empurra as setas (ou até o
+    // rodapé do site) pra fora da tela. Mede a altura de verdade do
+    // botão (em vez de um número fixo), então continua certo mesmo se o
+    // tamanho da seta mudar no CSS no futuro.
+    const setasEmBaixo = window.matchMedia('(max-width: 640px)').matches;
+    const setasH = (setasEmBaixo && el.btnAnterior)
+      ? el.btnAnterior.getBoundingClientRect().height + 20
+      : 0;
     const folga = 20; // respiro extra pra não colar nas bordas
-    const disponivel = Math.max(260, window.innerHeight - topoH - rodapeH - contadorH - folga);
+    const disponivel = Math.max(260, window.innerHeight - topoH - rodapeH - contadorH - setasH - folga);
     document.documentElement.style.setProperty('--livro-h', disponivel + 'px');
   }
 
@@ -318,13 +374,20 @@
 
   let livroFlip = null;
 
+  // true quando busca/categoria/marca está filtrando o catálogo — nesse
+  // caso a capa não aparece (ver montarPaginasHTML). "Ordenar" não conta
+  // como filtro aqui porque ele não reduz a lista, só muda a ordem.
+  function temFiltroAtivo() {
+    return !!(el.busca.value.trim() || el.categoria.value || (el.marca && el.marca.value));
+  }
+
   function renderizarLivro(lista) {
     el.gradeMobile.hidden = true;
     el.livroWrap.hidden = false;
     el.contador.hidden = false;
     ajustarAlturaLivro();
 
-    const paginas = montarPaginasHTML(lista);
+    const paginas = montarPaginasHTML(lista, !temFiltroAtivo());
     livroFlip = new LivroFlip(el.livro, paginas);
     atualizarContador(livroFlip);
   }
@@ -337,12 +400,38 @@
   el.btnAnterior.addEventListener('click', () => livroFlip && livroFlip.anterior());
   el.btnProximo.addEventListener('click', () => livroFlip && livroFlip.proxima());
 
+  // Passar o dedo pra virar a página (celular/tablet) — compara o quanto
+  // o dedo andou na horizontal vs. na vertical, pra só disparar a virada
+  // quando o gesto for claramente um "arrastar de lado" (senão um scroll
+  // vertical comum acabaria virando página sem querer).
+  (function ativarGestoDeArrastar() {
+    let inicioX = 0;
+    let inicioY = 0;
+    el.livroWrap.addEventListener('touchstart', (e) => {
+      const t = e.touches[0];
+      inicioX = t.clientX;
+      inicioY = t.clientY;
+    }, { passive: true });
+
+    el.livroWrap.addEventListener('touchend', (e) => {
+      const t = e.changedTouches[0];
+      const dx = t.clientX - inicioX;
+      const dy = t.clientY - inicioY;
+      const LIMIAR = 40;
+      if (Math.abs(dx) > LIMIAR && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        if (dx < 0) livroFlip && livroFlip.proxima();
+        else livroFlip && livroFlip.anterior();
+      }
+    }, { passive: true });
+  })();
+
   el.busca.addEventListener('input', () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(renderizar, 250);
   });
   el.categoria.addEventListener('change', renderizar);
   if (el.marca) el.marca.addEventListener('change', renderizar);
+  if (el.ordenar) el.ordenar.addEventListener('change', renderizar);
 
   let resizeTimer = null;
   window.addEventListener('resize', () => {
