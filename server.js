@@ -314,6 +314,42 @@ app.get('/api/produtos', async (req, res) => {
 
 app.get('/health', (req, res) => res.send('ok'));
 
+// Rota de diagnóstico do Chrome/Puppeteer — útil quando o botão de PDF/
+// revista digital dá erro numa hospedagem onde não dá pra ver os logs de
+// execução direto (ou pra confirmar rapidinho se a instalação automática
+// funcionou). Só mostra informação técnica sobre o Chrome, nada sensível.
+app.get('/debug-chrome', async (req, res) => {
+  let executablePathEsperado;
+  try {
+    executablePathEsperado = puppeteer.executablePath();
+  } catch (erro) {
+    executablePathEsperado = 'erro ao calcular: ' + erro.message;
+  }
+
+  const info = {
+    plataforma: process.platform,
+    versaoNode: process.version,
+    execPathNode: process.execPath,
+    npxCalculado: caminhoDoNpx(),
+    npxCalculadoExiste: fsSync.existsSync(caminhoDoNpx()),
+    executablePathEsperado,
+    chromeJaInstaladoAntes: chromeJaInstalado()
+  };
+
+  if (!info.chromeJaInstaladoAntes) {
+    try {
+      await garantirChromeInstalado();
+      info.resultadoTentativaAgora = chromeJaInstalado()
+        ? 'Chrome instalado com sucesso agora.'
+        : 'A tentativa rodou mas o Chrome ainda não foi encontrado depois — provavelmente falhou por algum motivo (rede, permissão, espaço em disco). Confira os logs de execução do servidor pra ver a mensagem de erro completa, registrada logo antes desta requisição.';
+    } catch (erro) {
+      info.resultadoTentativaAgora = 'Erro: ' + erro.message;
+    }
+  }
+
+  res.json(info);
+});
+
 // ---------------------------------------------------------------
 // Geração do PDF
 // ---------------------------------------------------------------
@@ -665,6 +701,20 @@ function chromeJaInstalado() {
   }
 }
 
+// Em algumas hospedagens (Hostinger/hPanel entre elas), o processo Node da
+// aplicação roda com um PATH mais "enxuto" do que o de um terminal normal —
+// suficiente pra achar o "node", mas não necessariamente o "npx" (eles nem
+// sempre moram na mesma pasta que o sistema aponta por padrão). Isso fazia
+// o "npx" simplesmente não ser encontrado (erro "ENOENT") e a instalação
+// automática do Chrome falhar silenciosamente. Em vez de confiar no PATH,
+// calculamos o caminho do "npx" a partir do caminho exato do "node" que já
+// está rodando este servidor agora (eles sempre ficam lado a lado, na mesma
+// pasta) — muito mais confiável do que torcer pro PATH estar certo.
+function caminhoDoNpx() {
+  const candidato = path.join(path.dirname(process.execPath), 'npx');
+  return fsSync.existsSync(candidato) ? candidato : 'npx';
+}
+
 let promessaChromeInstalado = null;
 function garantirChromeInstalado() {
   if (chromeJaInstalado()) return Promise.resolve();
@@ -672,13 +722,20 @@ function garantirChromeInstalado() {
     promessaChromeInstalado = (async () => {
       try {
         console.log('Chrome do Puppeteer não encontrado — baixando automaticamente (pode levar 1 minuto)...');
-        await execFileAsync('npx', ['puppeteer', 'browsers', 'install', 'chrome'], {
+        await execFileAsync(caminhoDoNpx(), ['puppeteer', 'browsers', 'install', 'chrome'], {
           cwd: __dirname,
           maxBuffer: 1024 * 1024 * 20
         });
         console.log('Chrome baixado com sucesso.');
       } catch (erro) {
-        console.error('Não foi possível baixar o Chrome automaticamente:', erro.message);
+        // Loga o máximo de detalhe possível (código do erro, ex.: "ENOENT"
+        // quando o comando nem foi encontrado) — como não temos acesso
+        // direto aos logs de execução da hospedagem, essa mensagem é a
+        // única pista disponível se isso continuar falhando.
+        console.error(
+          'Não foi possível baixar o Chrome automaticamente:',
+          erro.code || '', erro.message
+        );
       } finally {
         // Libera a "trava": se ainda faltar, a próxima geração tenta de novo
         // (em vez de ficar presa num erro antigo pra sempre).
