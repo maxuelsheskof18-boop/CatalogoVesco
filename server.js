@@ -46,6 +46,79 @@ const TMP_DIR = path.join(__dirname, 'public', 'tmp');
 // outras hospedagens (Hostinger, etc.) defina SITE_URL manualmente.
 const SITE_URL = (process.env.SITE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
 
+// Endereço do MESMO catálogo já publicado no Render — usado só como um
+// "plano B" automático para gerar PDF/revista digital. Motivo: descobrimos
+// (via /debug-chrome) que a Hostinger consegue instalar o Chrome do
+// Puppeteer, mas o próprio Chrome não consegue ABRIR lá, porque faltam
+// bibliotecas do sistema operacional que essa hospedagem compartilhada não
+// permite instalar sem acesso root (erro típico: "error while loading
+// shared libraries: libatk-bridge-2.0.so.0..."). Como isso é uma limitação
+// da hospedagem (não do código), a saída mais confiável é: quando o Chrome
+// não conseguir abrir NESSE servidor, encaminhar só essa geração pro Render
+// (que já roda o Chrome sem problema) e devolver o resultado de lá — o
+// visitante nem percebe a diferença. Pode trocar via variável de ambiente.
+const RENDER_FALLBACK_URL = (
+  process.env.RENDER_FALLBACK_URL || 'https://catalogo-vesco.onrender.com'
+).replace(/\/+$/, '');
+
+// Reconhece os erros que significam "o Chrome não consegue abrir NESTE
+// servidor" (falta de biblioteca do sistema, binário sem permissão de
+// execução, etc.) — diferente de outros erros (produto não encontrado,
+// timeout de uma foto específica, e assim por diante), que não devem
+// disparar o encaminhamento pro Render.
+function ehErroDeChromeIndisponivel(erro) {
+  const texto = String((erro && erro.message) || erro || '');
+  return (
+    texto.includes('Failed to launch the browser process') ||
+    texto.includes('error while loading shared libraries') ||
+    texto.includes('Could not find Chrome') ||
+    texto.includes('Permission denied') ||
+    texto.includes('libatk') ||
+    texto.includes('libnss') ||
+    texto.includes('libgobject') ||
+    texto.includes('libgtk')
+  );
+}
+
+// Encaminha a geração pro Render, preservando os mesmos filtros da
+// requisição original (busca/categoria/marca via query string). Usado só
+// quando o Chrome LOCAL falhou por indisponibilidade (ver acima) — nunca
+// como caminho padrão, já que gerar localmente é sempre mais rápido.
+async function encaminharGeracaoParaRender(caminho, req, res, { metodo = 'GET', corpo = null } = {}) {
+  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+  const urlDestino = `${RENDER_FALLBACK_URL}${caminho}${qs}`;
+  console.warn(`Chrome indisponível neste servidor — encaminhando geração pro Render: ${urlDestino}`);
+
+  const respostaRender = await fetch(urlDestino, {
+    method: metodo,
+    redirect: 'manual',
+    headers: corpo ? { 'Content-Type': 'application/json' } : undefined,
+    body: corpo ? JSON.stringify(corpo) : undefined
+  });
+
+  // A rota de revista digital redireciona (302) pro link do Heyzine — nesse
+  // caso, repassa o mesmo redirecionamento pro visitante, sem baixar nada
+  // aqui no meio (é só um link).
+  if (respostaRender.status >= 300 && respostaRender.status < 400 && respostaRender.headers.get('location')) {
+    return res.redirect(respostaRender.headers.get('location'));
+  }
+
+  if (!respostaRender.ok) {
+    const textoErro = await respostaRender.text().catch(() => '');
+    throw new Error(
+      `O servidor de apoio (Render) também não conseguiu gerar (status ${respostaRender.status}): ` +
+      textoErro.slice(0, 500)
+    );
+  }
+
+  const buffer = Buffer.from(await respostaRender.arrayBuffer());
+  const tipo = respostaRender.headers.get('content-type');
+  const disposicao = respostaRender.headers.get('content-disposition');
+  if (tipo) res.setHeader('Content-Type', tipo);
+  if (disposicao) res.setHeader('Content-Disposition', disposicao);
+  res.send(buffer);
+}
+
 const ITEMS_PER_PAGE = 10;
 const BANNER_EVERY_PAGES = 4;
 
@@ -486,10 +559,13 @@ function gerarHTML(paginas, totalProdutos, opts = {}) {
 <head>
 <meta charset="utf-8"/>
 <title>Catálogo Vesco</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }
-  html, body { margin:0; padding:0; font-family: 'Segoe UI', Arial, sans-serif; color:#0f2a3d; }
+  html, body { margin:0; padding:0; font-family: 'Inter', 'Segoe UI', Arial, sans-serif; color:#16232c; -webkit-font-smoothing:antialiased; }
   .pagina {
     width: 210mm; height: 297mm; padding: 14mm 14mm 10mm;
     page-break-after: always; display:flex; flex-direction:column;
@@ -504,14 +580,14 @@ function gerarHTML(paginas, totalProdutos, opts = {}) {
   .cabecalho-marca { font-weight:800; letter-spacing:3px; color:#00334d; font-size:14px; }
   .cabecalho-pagina { font-weight:700; color:#00a859; font-size:13px; }
   .grade { flex:1; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(5, 1fr); gap:10px; }
-  .produto { display:flex; flex-direction:row; align-items:center; text-align:left; gap:10px; border:1px solid #e6ecf0; border-radius:10px; padding:8px; height:100%; box-shadow:0 2px 8px rgba(0,51,77,.05); }
+  .produto { display:flex; flex-direction:row; align-items:center; text-align:left; gap:11px; border:1px solid #e6ecf0; border-radius:10px; padding:9px; height:100%; box-shadow:0 2px 8px rgba(0,51,77,.05); }
   .produto-img { width:38%; max-width:90px; height:90%; display:flex; align-items:center; justify-content:center; background:#f8fafb; border:1px solid #e6ecf0; border-radius:8px; overflow:hidden; flex:0 0 auto; }
   .produto-img img { max-width:100%; max-height:100%; object-fit:contain; }
   .produto-info { min-width:0; display:flex; flex-direction:column; align-items:flex-start; }
-  .produto-marca { color:#00a859; font-weight:800; font-size:8.5px; text-transform:uppercase; letter-spacing:.5px; }
-  .produto-nome { font-weight:700; font-size:11px; line-height:1.2; margin:3px 0; color:#0f2a3d; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-  .produto-cod { font-size:8.5px; color:#6b7c85; }
-  .produto-preco { display:inline-block; margin-top:4px; padding:2px 10px; border-radius:999px; background:rgba(0,168,89,.12); color:#00753d; font-weight:800; font-size:11.5px; }
+  .produto-marca { color:#00a859; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:.4px; }
+  .produto-nome { font-weight:600; font-size:13px; line-height:1.32; margin:4px 0; color:#16232c; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; letter-spacing:-.1px; }
+  .produto-cod { font-size:10px; color:#5c6b73; }
+  .produto-preco { display:inline-block; margin-top:5px; padding:3px 11px; border-radius:999px; background:rgba(0,168,89,.12); color:#00753d; font-weight:700; font-size:13px; letter-spacing:-.1px; }
   .banner { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; background: linear-gradient(160deg, #eef7f2, #dff2e7); border-radius:16px; }
   .banner h2 { color:#00334d; font-size:26px; margin:0 0 8px; }
   .banner p { color:#37525f; font-size:14px; margin:0; }
@@ -595,29 +671,32 @@ function gerarHTMLCarrinho(itens) {
 <head>
 <meta charset="utf-8"/>
 <title>Orçamento Vesco</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; }
-  html, body { margin:0; padding:0; font-family: 'Segoe UI', Arial, sans-serif; color:#0f2a3d; }
+  html, body { margin:0; padding:0; font-family: 'Inter', 'Segoe UI', Arial, sans-serif; color:#16232c; -webkit-font-smoothing:antialiased; }
   .pagina { width: 210mm; height: 297mm; padding: 14mm; page-break-after: always; display:flex; flex-direction:column; }
   .cabecalho { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #00334d; padding-bottom:8px; margin-bottom:16px; }
   .cabecalho-marca { font-weight:800; letter-spacing:2px; color:#00334d; font-size:14px; }
   .cabecalho-pagina { font-weight:700; color:#00a859; font-size:13px; }
   .tabela-carrinho { width:100%; border-collapse: collapse; }
-  .tabela-carrinho th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:#6b7c85; padding:6px 8px; border-bottom:2px solid #e6ecf0; }
-  .tabela-carrinho td { padding:8px; border-bottom:1px solid #eef1f2; vertical-align:middle; font-size:12px; }
+  .tabela-carrinho th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#5c6b73; padding:7px 8px; border-bottom:2px solid #e6ecf0; }
+  .tabela-carrinho td { padding:9px 8px; border-bottom:1px solid #eef1f2; vertical-align:middle; font-size:13px; }
   .col-preco, .col-qtd, .col-subtotal { text-align:right; white-space:nowrap; }
   .col-qtd { text-align:center; }
-  .col-subtotal { font-weight:800; color:#00753d; }
+  .col-subtotal { font-weight:700; color:#00753d; }
   .linha-produto { display:flex; align-items:center; gap:10px; }
   .linha-produto img { width:40px; height:40px; object-fit:contain; border-radius:6px; background:#f8fafb; border:1px solid #e6ecf0; flex:0 0 auto; }
-  .linha-nome { font-weight:700; font-size:12px; }
-  .linha-cod { font-size:9.5px; color:#6b7c85; margin-top:2px; }
+  .linha-nome { font-weight:600; font-size:13px; letter-spacing:-.1px; }
+  .linha-cod { font-size:10.5px; color:#5c6b73; margin-top:2px; }
   .total-geral { margin-top:18px; padding-top:14px; border-top:2px solid #00334d; display:flex; justify-content:space-between; align-items:baseline; }
-  .total-geral span { font-size:14px; font-weight:700; }
-  .total-geral strong { font-size:22px; color:#00334d; }
-  .aviso-consulte { font-size:10px; color:#6b7c85; margin-top:8px; }
-  .rodape { margin-top:auto; text-align:center; font-size:9px; color:#8fa1a8; padding-top:8px; border-top:1px solid #eef1f2; }
+  .total-geral span { font-size:14px; font-weight:600; }
+  .total-geral strong { font-size:22px; color:#00334d; font-weight:700; }
+  .aviso-consulte { font-size:10.5px; color:#5c6b73; margin-top:8px; }
+  .rodape { margin-top:auto; text-align:center; font-size:9.5px; color:#8fa1a8; padding-top:8px; border-top:1px solid #eef1f2; }
 </style>
 </head>
 <body>
@@ -874,6 +953,19 @@ async function renderizarLoteParaArquivo(html, caminhoDestino) {
     // normal só pra ligar o Chrome headless.
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
+    // Espera a fonte (Google Fonts, carregada via <link> no HTML) terminar
+    // de baixar antes de continuar — sem isso, o PDF às vezes saía com a
+    // fonte de reserva do sistema (o "document.fonts.ready" do navegador
+    // avisa exatamente quando toda fonte usada na página já carregou). Um
+    // limite de 5s por segurança, caso a fonte não consiga carregar por
+    // algum motivo (a página já tem uma fonte de reserva definida no CSS).
+    await page.evaluate(() => {
+      return Promise.race([
+        document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve(),
+        new Promise((resolve) => setTimeout(resolve, 5000))
+      ]);
+    });
+
     // Em vez disso, esperamos as fotos em paralelo com um limite de tempo
     // PRÓPRIO POR FOTO: cada uma tem até 8s pra carregar; a que não
     // conseguir simplesmente fica pra trás (o "onerror" no HTML já troca
@@ -1010,7 +1102,14 @@ app.get('/gerar-pdf', async (req, res) => {
     if (cacheado && Date.now() - cacheado.geradoEm < PDF_CACHE_TTL_MS) {
       pdfBuffer = cacheado.buffer;
     } else {
-      pdfBuffer = await gerarPdfBuffer(produtos);
+      try {
+        pdfBuffer = await gerarPdfBuffer(produtos);
+      } catch (erroChrome) {
+        if (ehErroDeChromeIndisponivel(erroChrome)) {
+          return await encaminharGeracaoParaRender('/gerar-pdf', req, res);
+        }
+        throw erroChrome;
+      }
       cachePdf.set(chave, { buffer: pdfBuffer, geradoEm: Date.now() });
     }
 
@@ -1038,7 +1137,18 @@ app.post('/gerar-pdf-carrinho', async (req, res) => {
       return res.status(413).send('Carrinho com produtos demais pra gerar de uma vez.');
     }
 
-    const pdfBuffer = await gerarPdfCarrinho(itens);
+    let pdfBuffer;
+    try {
+      pdfBuffer = await gerarPdfCarrinho(itens);
+    } catch (erroChrome) {
+      if (ehErroDeChromeIndisponivel(erroChrome)) {
+        return await encaminharGeracaoParaRender('/gerar-pdf-carrinho', req, res, {
+          metodo: 'POST',
+          corpo: { itens }
+        });
+      }
+      throw erroChrome;
+    }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="orcamento-vesco.pdf"');
     res.send(pdfBuffer);
@@ -1128,7 +1238,15 @@ app.get('/gerar-flipbook', async (req, res) => {
       return res.redirect(cacheado.url);
     }
 
-    const pdfBuffer = await gerarPdfBuffer(produtos);
+    let pdfBuffer;
+    try {
+      pdfBuffer = await gerarPdfBuffer(produtos);
+    } catch (erroChrome) {
+      if (ehErroDeChromeIndisponivel(erroChrome)) {
+        return await encaminharGeracaoParaRender('/gerar-flipbook', req, res);
+      }
+      throw erroChrome;
+    }
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     const urlFlipbook = await converterParaFlipbook(pdfBuffer, baseUrl);
 
