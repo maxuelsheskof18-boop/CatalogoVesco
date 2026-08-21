@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Catálogo Vesco — Soluções em Higiene e Limpeza</title>
+<link rel="stylesheet" href="style.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-marca">
+      <span class="marca-nome">VESCO</span>
+      <span class="marca-tag">Higiene &amp; Limpeza</span>
+    </div>
+
+    <div class="topo-busca">
+      <input type="search" id="busca" placeholder="Buscar produto, marca ou código..." autocomplete="off" />
+      <select id="categoria">
+        <option value="">Todas as categorias</option>
+      </select>
+      <select id="marca">
+        <option value="">Todas as marcas</option>
+      </select>
+      <select id="ordenar">
+        <option value="">Ordem padrão (A-Z)</option>
+        <option value="mais-vendidos">Mais vendidos</option>
+        <option value="menor-preco">Menor preço</option>
+        <option value="maior-preco">Maior preço</option>
+      </select>
+    </div>
+
+    <div class="topo-acoes">
+      <button id="btnCarrinho" class="botao-carrinho" type="button">
+        <span>🛒 Carrinho</span>
+        <span id="carrinhoContador" class="carrinho-contador" hidden>0</span>
+      </button>
+
+      <a id="btnVerRevista" class="botao-baixar botao-secundario" href="/gerar-flipbook" target="_blank" rel="noopener">
+        <span>Ver como revista online</span>
+      </a>
+
+      <a id="btnBaixarPdf" class="botao-baixar" href="/gerar-pdf" target="_blank" rel="noopener">
+        <span>Baixar catálogo em PDF</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- painel do carrinho de orçamento — fica escondido até clicar em
+       "Carrinho"; o conteúdo de dentro (lista de itens, total) é montado
+       inteiramente pelo main.js (ver renderizarCarrinho). -->
+  <div id="carrinhoOverlay" class="carrinho-overlay" hidden>
+    <div class="carrinho-painel" role="dialog" aria-label="Carrinho de orçamento">
+      <div class="carrinho-cabecalho">
+        <h2>Seu carrinho</h2>
+        <button id="btnFecharCarrinho" class="carrinho-fechar" type="button" aria-label="Fechar carrinho">×</button>
+      </div>
+      <div id="carrinhoLista" class="carrinho-lista"></div>
+      <div class="carrinho-rodape">
+        <button id="btnEsvaziarCarrinho" class="carrinho-esvaziar" type="button">Esvaziar carrinho</button>
+        <div class="carrinho-total">
+          <span>Total</span>
+          <strong id="carrinhoTotal">R$ 0,00</strong>
+        </div>
+        <div class="carrinho-acoes">
+          <button id="btnCarrinhoWhatsapp" class="botao-whatsapp" type="button" disabled>Enviar no WhatsApp</button>
+          <button id="btnCarrinhoPdf" class="botao-pdf-carrinho" type="button" disabled>Gerar PDF do carrinho</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div id="statusCarregando" class="status">Carregando catálogo…</div>
+    <div id="statusErro" class="status status-erro" hidden></div>
+    <div id="statusVazio" class="status" hidden>Nenhum produto encontrado para essa busca.</div>
+
+    <div id="livroWrap" class="livro-wrap" hidden>
+      <button id="btnAnterior" class="nav nav-esq" aria-label="Página anterior">‹</button>
+      <div class="livro-stage">
+        <div id="livro" class="livro"></div>
+      </div>
+      <button id="btnProximo" class="nav nav-dir" aria-label="Próxima página">›</button>
+    </div>
+
+    <div id="contadorPagina" class="contador" hidden></div>
+
+    <!-- versão em grade simples, usada automaticamente em telas pequenas -->
+    <div id="gradeMobile" class="grade-mobile" hidden></div>
+  </main>
+
+  <footer class="rodape-site">
+    Catálogo atualizado automaticamente a partir do seu estoque · Vesco Negócios
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>

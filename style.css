@@ -1,0 +1,722 @@
+:root {
+  --primary: #00334d;
+  --primary-light: #01547d;
+  --accent: #00a859;
+  --bg: #f4f7f8;
+  --card: #ffffff;
+  --text: #0f2a3d;
+  --muted: #6b7c85;
+  --border: #e6ecf0;
+  --radius: 14px;
+  /* espaço horizontal reservado pros botões de "página anterior/próxima"
+     ao redor do livro — encolhe em telas menores pra sobrar mais largura
+     pro livro em si (ver breakpoints mais abaixo). */
+  --livro-chrome-x: 180px;
+}
+
+* { box-sizing: border-box; }
+
+/* garante que [hidden] sempre esconda o elemento, mesmo quando a classe
+   dele define display:flex/grid em outro lugar da folha de estilos */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---------- topo ---------- */
+.topo {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  background: var(--primary);
+  color: #fff;
+  padding: 14px 28px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.15);
+}
+
+.topo-marca {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  margin-right: auto;
+}
+.marca-nome { font-weight: 800; font-size: 22px; letter-spacing: 3px; }
+.marca-tag { font-size: 11px; opacity: .75; letter-spacing: .5px; }
+
+.topo-busca {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1 1 380px;
+  max-width: 720px;
+}
+.topo-busca input,
+.topo-busca select {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+.topo-busca input { flex: 2 1 160px; min-width: 140px; }
+.topo-busca select { flex: 1 1 130px; min-width: 120px; max-width: 190px; color: var(--text); }
+
+.topo-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.botao-baixar {
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 11px 20px;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: filter .15s ease, transform .15s ease;
+}
+.botao-baixar:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+.botao-secundario {
+  background: transparent;
+  border: 1.5px solid rgba(255,255,255,.55);
+  color: #fff;
+}
+.botao-secundario:hover { background: rgba(255,255,255,.1); filter: none; }
+
+/* botão do carrinho, no cabeçalho — mesmo visual do botao-secundario,
+   com uma bolinha de contagem que só aparece quando tem item dentro. */
+.botao-carrinho {
+  position: relative;
+  background: transparent;
+  border: 1.5px solid rgba(255,255,255,.55);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  font-family: inherit;
+  padding: 11px 20px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.botao-carrinho:hover { background: rgba(255,255,255,.1); }
+.carrinho-contador {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--primary);
+}
+.carrinho-contador[hidden] { display: none; }
+
+/* ---------- carrinho (painel lateral) ---------- */
+.carrinho-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,42,61,.5);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+}
+.carrinho-painel {
+  width: min(420px, 100vw);
+  height: 100%;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 30px rgba(0,0,0,.25);
+  animation: carrinho-entrar .22s ease;
+}
+@keyframes carrinho-entrar {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.carrinho-cabecalho {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--primary);
+  color: #fff;
+}
+.carrinho-cabecalho h2 { margin: 0; font-size: 17px; font-weight: 800; }
+.carrinho-fechar {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.carrinho-lista {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 16px;
+}
+.carrinho-vazio {
+  text-align: center;
+  color: var(--muted);
+  padding: 50px 20px;
+  font-size: 14px;
+}
+.carrinho-item {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.carrinho-item img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f8fafb;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.carrinho-item-info { flex: 1; min-width: 0; }
+.carrinho-item-nome {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.carrinho-item-preco { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.carrinho-item-controles {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.carrinho-item-qtd {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.carrinho-item-qtd button {
+  background: var(--bg);
+  border: none;
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--primary);
+  cursor: pointer;
+}
+.carrinho-item-qtd span { min-width: 22px; text-align: center; font-size: 13px; font-weight: 700; }
+.carrinho-item-remover {
+  background: transparent;
+  border: none;
+  color: #b3261e;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+.carrinho-item-subtotal {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--primary);
+  white-space: nowrap;
+}
+.carrinho-rodape {
+  border-top: 1px solid var(--border);
+  padding: 16px 20px 20px;
+  background: #fff;
+}
+.carrinho-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.carrinho-total strong { font-size: 20px; color: var(--primary); }
+.carrinho-esvaziar {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0 0 12px;
+  display: block;
+}
+.carrinho-acoes { display: flex; flex-direction: column; gap: 8px; }
+.carrinho-acoes button {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter .15s ease;
+}
+.carrinho-acoes button:hover { filter: brightness(1.08); }
+.carrinho-acoes button:disabled { opacity: .5; cursor: not-allowed; filter: none; }
+.botao-whatsapp { background: #25d366; color: #06301b; }
+.botao-pdf-carrinho { background: var(--primary); color: #fff; }
+
+/* avisinho rápido ("Adicionado ao carrinho") — aparece embaixo, some
+   sozinho depois de um instante. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%) translateY(0);
+  background: var(--primary);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  z-index: 200;
+  opacity: 1;
+  transition: opacity .3s ease, transform .3s ease;
+  pointer-events: none;
+}
+.toast.toast-saindo { opacity: 0; transform: translateX(-50%) translateY(10px); }
+
+/* ---------- status ---------- */
+.status {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+  font-size: 15px;
+}
+.status-erro { color: #b3261e; }
+
+/* ---------- livro (flipbook) ---------- */
+main {
+  min-height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 10px 6px;
+}
+
+.livro-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  justify-content: center;
+  padding: 10px;
+  border-radius: 28px;
+  background: radial-gradient(ellipse at center, rgba(0,51,77,.07) 0%, rgba(0,51,77,0) 72%);
+}
+
+/* --livro-h é calculada e atualizada via JavaScript (main.js), medindo
+   a altura real do cabeçalho, do rodapé e do contador de página nesse
+   exato instante — por isso o livro sempre sabe, com precisão, quanto
+   espaço realmente sobra na tela, mesmo se o cabeçalho quebrar em duas
+   linhas num celular ou numa janela estreita. As três medidas dentro
+   do min() competem entre si: a menor sempre vence, então a caixa
+   encolhe pela largura OU pela altura, o que for mais apertado — nunca
+   corta produto nenhum, nunca "vaza" pra fora da tela. */
+.livro-stage {
+  position: relative;
+  width: min(1300px, calc(100vw - var(--livro-chrome-x)), calc(var(--livro-h, 82vh) * 1300 / 1500));
+  aspect-ratio: 1300 / 1500;
+  max-height: var(--livro-h, 82vh);
+  perspective: 2200px;
+  /* Estabelece esse elemento como referência de tamanho ("container") pra
+     tudo que tem dentro do livro (padding, fontes, espaçamentos) poder ser
+     medido em "cqw" (1cqw = 1% da LARGURA DE VERDADE, já renderizada, desse
+     elemento) em vez de pixel fixo. Isso resolve de vez o problema de "em
+     100% de zoom fica ruim, em 80% fica bom": pixel fixo não sabe o
+     tamanho real que o livro ocupou na tela (que muda com zoom, tamanho de
+     janela, tablet vs celular, etc.), só "cqw" sabe — então tudo dentro do
+     livro encolhe/cresce sempre na proporção certa, automaticamente,
+     não importa o zoom nem o tamanho de tela. */
+  container-type: inline-size;
+}
+
+.livro {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-shadow: 0 20px 50px rgba(0,51,77,.28);
+  border-radius: 4px 10px 10px 4px;
+  overflow: visible;
+}
+
+/* lombada do livro, só decorativa */
+.livro::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 4px;
+  bottom: 4px;
+  width: 10px;
+  background: linear-gradient(90deg, rgba(0,51,77,.35), rgba(0,51,77,0));
+  border-radius: 6px;
+  z-index: 0;
+}
+
+.nav {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--primary);
+  font-size: 30px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex: 0 0 auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,.08);
+  transition: background .15s ease;
+}
+.nav:hover { background: #eef3f5; }
+
+.contador {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* páginas dentro do flipbook — cada uma ocupa o container inteiro,
+   empilhadas, e a troca é animada com um giro 3D (efeito de virar página) */
+.pagina-livro {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  /* cqw = % da largura real do livro (ver container-type em .livro-stage).
+     clamp(piso, valor-proporcional, teto): nunca menor que o piso (legível
+     mesmo num celular pequeno) nem maior que o teto (o valor "de projeto",
+     pensado pro livro no tamanho grande de desktop). */
+  padding: clamp(8px, 3.23cqw, 42px) clamp(8px, 3.23cqw, 42px) clamp(5px, 2.15cqw, 28px);
+  display: flex;
+  flex-direction: column;
+  border-radius: inherit;
+  backface-visibility: hidden;
+  transform-origin: left center;
+  transform: rotateY(0deg);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+  transition: transform .5s cubic-bezier(.4,.1,.2,1), opacity .35s ease, box-shadow .5s ease;
+}
+.pagina-livro.st-instant { transition: none !important; }
+.pagina-livro.st-ativa {
+  opacity: 1;
+  pointer-events: auto;
+  z-index: 3;
+  box-shadow: none;
+}
+.pagina-livro.st-saindo-esq {
+  opacity: 1;
+  transform: rotateY(-140deg);
+  box-shadow: 12px 0 30px rgba(0,0,0,.25);
+  z-index: 2;
+}
+.pagina-livro.st-entrando-dir {
+  opacity: 1;
+  transform: rotateY(140deg);
+  z-index: 2;
+}
+.pagina-livro.st-saindo-dir {
+  opacity: 1;
+  transform: rotateY(140deg);
+  box-shadow: -12px 0 30px rgba(0,0,0,.25);
+  z-index: 2;
+}
+.pagina-livro.st-entrando-esq {
+  opacity: 1;
+  transform: rotateY(-140deg);
+  z-index: 2;
+}
+.pagina-capa {
+  background: linear-gradient(160deg, var(--primary), var(--primary-light));
+  color: #fff;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.pagina-capa .capa-marca { letter-spacing: clamp(4px, .62cqw, 8px); font-weight: 800; opacity: .85; margin-bottom: clamp(8px, 1.69cqw, 22px); font-size: clamp(10px, 1.31cqw, 17px); }
+.pagina-capa h1 { font-size: clamp(20px, 3.38cqw, 44px); margin: 0 0 clamp(8px, 1.08cqw, 14px); }
+.pagina-capa p { font-size: clamp(11px, 1.46cqw, 19px); opacity: .8; margin: 0; }
+
+.pagina-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: clamp(3px, .92cqw, 12px);
+  margin-bottom: clamp(5px, 1.85cqw, 24px);
+  font-weight: 800;
+  color: var(--primary);
+  font-size: clamp(9px, 1.38cqw, 18px);
+  letter-spacing: clamp(.5px, .15cqw, 2px);
+}
+
+/* 10 produtos por página, em grade 2x5 — as linhas usam "1fr" pra se
+   esticarem e ocupar toda a altura disponível da página, sem sobrar
+   espaço em branco embaixo (mesmo numa página com menos produtos). */
+.pagina-grade {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: repeat(5, 1fr);
+  gap: clamp(4px, .92cqw, 12px);
+  overflow: hidden;
+}
+
+.produto-card {
+  position: relative;
+  display: flex;
+  gap: clamp(4px, .77cqw, 10px);
+  border: 1px solid var(--border);
+  border-radius: clamp(6px, 1.08cqw, 14px);
+  padding: clamp(3px, .77cqw, 10px);
+  align-items: center;
+  text-align: left;
+  background: #fff;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,51,77,.05);
+  transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
+}
+.produto-card:hover {
+  box-shadow: 0 10px 24px rgba(0,51,77,.14);
+  transform: translateY(-2px);
+  border-color: rgba(0,168,89,.35);
+}
+/* selo "Mais vendido" — só aparece nos produtos marcados com "destaque"
+   na planilha (ver README). Fica preso no canto do card; usa "cqw" igual
+   ao resto de dentro do livro, pra continuar do tamanho certo em
+   qualquer zoom/tela. */
+.produto-selo {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--accent, #00a859);
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(6px, .7cqw, 9px);
+  letter-spacing: .3px;
+  padding: clamp(1px, .25cqw, 3px) clamp(4px, .6cqw, 8px);
+  border-radius: 0 clamp(5px, 1.08cqw, 13px) 0 8px;
+  text-transform: uppercase;
+  z-index: 1;
+}
+.produto-card img {
+  width: min(clamp(22px, 7.69cqw, 100px), 40%);
+  height: 92%;
+  object-fit: contain;
+  border-radius: clamp(4px, .62cqw, 8px);
+  background: #f8fafb;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+/* botão "+" pra adicionar o produto ao carrinho — fica preso no canto
+   inferior direito do card (o "Mais vendido" já usa o canto superior),
+   também em "cqw" pra continuar do tamanho certo em qualquer zoom/tela.
+   Um só listener (delegado, ver ativarCarrinho no main.js) cuida de
+   todo clique nesse botão, porque os cards são recriados a cada
+   página/filtro — não dá pra prender um listener em cada um. */
+.produto-add-carrinho {
+  position: absolute;
+  bottom: clamp(3px, .6cqw, 8px);
+  right: clamp(3px, .6cqw, 8px);
+  width: clamp(16px, 2.15cqw, 26px);
+  height: clamp(16px, 2.15cqw, 26px);
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(11px, 1.38cqw, 17px);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(0,51,77,.35);
+  transition: transform .12s ease, background .12s ease;
+}
+.produto-add-carrinho:hover { background: var(--accent); transform: scale(1.1); }
+.produto-add-carrinho:active { transform: scale(.92); }
+.produto-card .produto-info { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.produto-card .produto-marca { color: var(--accent); font-weight: 800; font-size: clamp(6.5px, .77cqw, 10px); letter-spacing: .5px; text-transform: uppercase; }
+.produto-card .produto-nome { font-weight: 700; font-size: clamp(8px, .96cqw, 12.5px); line-height: 1.2; margin: clamp(1px, .23cqw, 3px) 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.produto-card .produto-cod { font-size: clamp(6.5px, .77cqw, 10px); color: var(--muted); }
+.produto-card .produto-preco {
+  display: inline-block;
+  margin-top: clamp(1px, .31cqw, 4px);
+  padding: clamp(1px, .23cqw, 3px) clamp(6px, .85cqw, 11px);
+  border-radius: 999px;
+  background: rgba(0,168,89,.12);
+  color: #00753d;
+  font-weight: 800;
+  font-size: clamp(8px, 1cqw, 13px);
+  letter-spacing: .2px;
+}
+
+.pagina-banner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: linear-gradient(160deg, #eef7f2, #dff2e7);
+  border-radius: 12px;
+}
+.pagina-banner h2 { color: var(--primary); font-size: clamp(13px, 1.38cqw, 18px); margin: 0 0 clamp(4px, .46cqw, 6px); }
+.pagina-banner p { color: #37525f; font-size: clamp(10px, .92cqw, 12px); margin: 0; }
+
+.pagina-rodape {
+  text-align: center;
+  font-size: 8px;
+  color: #a8b6bc;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #eef1f2;
+}
+
+/* ---------- grade mobile (fallback em telas pequenas) ---------- */
+.grade-mobile {
+  width: 100%;
+  max-width: 720px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+.grade-mobile .produto-card {
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+.grade-mobile .produto-card img { width: 100%; height: 110px; }
+
+.rodape-site {
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+
+/* telas médias (tablets, janelas menores de PC): encolhe as margens e
+   os botões de navegação do livro, pra sobrar mais espaço horizontal
+   pra caixa em si — sem isso, num tablet o livro ficava espremido ou
+   até cortado nas laterais. (O conteúdo DE DENTRO do livro — padding,
+   fontes, cards — não precisa mais de regras aqui: agora ele escala
+   sozinho e continuamente com "cqw", ver .livro-stage/.pagina-livro/
+   .produto-card acima, então funciona certinho em qualquer zoom ou
+   tamanho de tela, não só nesses dois tamanhos "de referência".) */
+@media (max-width: 1024px) {
+  :root { --livro-chrome-x: 140px; }
+  .livro-wrap { gap: 6px; padding: 6px; }
+  .nav { width: 38px; height: 38px; font-size: 22px; }
+}
+
+@media (max-width: 900px) {
+  .topo { gap: 12px; padding: 12px 16px; }
+  .topo-busca { max-width: none; }
+}
+
+@media (max-width: 720px) {
+  .topo { padding: 12px 16px; }
+  .botao-baixar span { display: none; }
+  .botao-baixar::after { content: '⬇ PDF'; }
+  .botao-secundario::after { content: '📖 Revista'; }
+}
+
+/* celular: exatamente a mesma aparência do site inteiro (mesmo
+   cabeçalho, mesmo livro com 2 colunas de produto por página) — só
+   menor, pra caber na tela. Nada de reorganizar ou trocar o layout,
+   só encolher tudo proporcionalmente. Abaixo desse tamanho o
+   cabeçalho empilha em coluna (marca, busca, botões, cada um ocupando
+   a largura toda) em vez de tentar quebrar linha sozinho de um jeito
+   imprevisível. */
+@media (max-width: 640px) {
+  /* as setinhas saem de "do lado" do livro e passam pra "embaixo" dele
+     (ver .livro-wrap logo abaixo), então não precisam mais reservar
+     espaço na LARGURA — sobra a tela quase inteira pro livro em si,
+     que fica maior/mais legível no celular. */
+  :root { --livro-chrome-x: 16px; }
+  .topo { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 14px; }
+  .topo-marca { margin-right: 0; flex-direction: row; align-items: baseline; gap: 8px; }
+  /* sem isso, o "flex: 1 1 380px" (pensado pro cabeçalho em linha)
+     faz a busca esticar pra ocupar o espaço vertical todo do
+     cabeçalho empilhado, virando um balão gigante */
+  .topo-busca { flex: 0 0 auto; max-width: none; }
+  .topo-acoes { flex: 0 0 auto; width: 100%; }
+  .topo-acoes .botao-baixar { flex: 1 1 0; text-align: center; }
+  main { padding: 6px 4px 4px; }
+
+  /* celular: livro em cima, as duas setas lado a lado embaixo dele (em
+     vez de uma de cada lado, que sumiam/ficavam espremidas numa tela
+     estreita). Dá pra continuar usando as setas normalmente, e também
+     dá pra passar a página arrastando o dedo pro lado, direto em cima
+     do livro (ver "ativarGestoDeArrastar" no main.js). */
+  .livro-wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "palco palco"
+      "esq   dir";
+    justify-items: center;
+    row-gap: 10px;
+    gap: 10px;
+    padding: 2px;
+  }
+  .livro-stage { grid-area: palco; }
+  .nav-esq { grid-area: esq; }
+  .nav-dir { grid-area: dir; }
+  .nav { width: 40px; height: 40px; font-size: 20px; }
+  /* o conteúdo de dentro do livro (padding, fontes, cards) já escala
+     sozinho com "cqw" — não precisa mais de regras aqui (ver comentário
+     no breakpoint de 1024px acima). */
+
+  /* carrinho vira uma "gaveta" de baixo pra cima, ocupando a tela toda
+     na horizontal — mais fácil de usar com o polegar do que um painel
+     fino do lado direito, que sobraria pouquíssimo espaço no celular. */
+  .carrinho-overlay { align-items: flex-end; }
+  .carrinho-painel { width: 100%; height: min(80vh, 560px); border-radius: 18px 18px 0 0; }
+  @keyframes carrinho-entrar { from { transform: translateY(100%); } to { transform: translateY(0); } }
+}
