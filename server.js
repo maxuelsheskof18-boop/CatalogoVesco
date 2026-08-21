@@ -121,7 +121,20 @@ const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json({ limit: '256kb' })); // usado só pelo /gerar-pdf-carrinho (POST com a lista de itens)
-app.use(express.static(path.join(__dirname, 'public')));
+// "no-store" nos arquivos do site (HTML/CSS/JS) — sem isso, o navegador de
+// quem já visitou o site guarda o main.js/style.css antigo em cache e
+// continua usando ele por conta própria em visitas seguintes, mesmo depois
+// de uma atualização já estar publicada de verdade no servidor (foi
+// exatamente esse o motivo do botão "+" do carrinho não aparecer depois de
+// publicar o v27: o servidor já estava certo, mas o navegador insistia no
+// main.js de antes). Como esse catálogo é atualizado com frequência e não
+// é um site de tráfego gigante, vale mais a pena garantir "sempre a versão
+// certa" do que economizar uns poucos KB de banda por visita.
+app.use(
+  express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-store')
+  })
+);
 
 // ---------------------------------------------------------------
 // Cache simples em memória para não bater na planilha a cada request
