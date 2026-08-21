@@ -34,7 +34,7 @@
   // Número de WhatsApp que recebe os pedidos do carrinho (formato
   // internacional, só dígitos, sem "+"). Pra trocar, é só editar essa
   // linha — o mesmo número que já aparece na contracapa do PDF.
-  const WHATSAPP_NUMERO = '5511989433272';
+  const WHATSAPP_NUMERO = '5511127614730';
 
   let todosProdutos = [];
   let debounceTimer = null;
