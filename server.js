@@ -347,6 +347,25 @@ app.get('/debug-chrome', async (req, res) => {
     } catch (erro) {
       info.resultadoTentativaAgora = 'Erro: ' + erro.message;
     }
+  } else {
+    // O Chrome existir em disco não garante que ele CONSEGUE abrir (ex.:
+    // falta alguma biblioteca do sistema que o Chrome precisa, ou o
+    // binário perdeu a permissão de execução do mesmo jeito que o atalho
+    // do puppeteer perdeu). Por isso, quando ele já está instalado, damos
+    // um "test drive" de verdade aqui — abre, fecha, e devolve o erro
+    // COMPLETO (igual ao que aparece nos logs de execução da Hostinger,
+    // só que sem precisar entrar lá) se algo der errado.
+    try {
+      const testeBrowser = await puppeteer.launch({
+        headless: true,
+        timeout: 20000,
+        args: CHROME_ARGS
+      });
+      await testeBrowser.close();
+      info.testeDeAbrirOChrome = 'Abriu e fechou o Chrome com sucesso.';
+    } catch (erro) {
+      info.testeDeAbrirOChrome = 'Falhou ao abrir o Chrome: ' + erro.message;
+    }
   }
 
   res.json(info);
