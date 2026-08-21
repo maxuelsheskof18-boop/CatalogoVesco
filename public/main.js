@@ -18,6 +18,7 @@
     livro: document.getElementById('livro'),
     gradeMobile: document.getElementById('gradeMobile'),
     contador: document.getElementById('contadorPagina'),
+    paginacao: document.getElementById('paginacao'),
     btnAnterior: document.getElementById('btnAnterior'),
     btnProximo: document.getElementById('btnProximo'),
     btnCarrinho: document.getElementById('btnCarrinho'),
@@ -339,6 +340,7 @@
     if (lista.length === 0) {
       el.livroWrap.hidden = true;
       el.contador.hidden = true;
+      if (el.paginacao) el.paginacao.hidden = true;
       el.statusVazio.hidden = false;
       return;
     }
@@ -449,6 +451,29 @@
         this._garantirMontada(novoIndex + (direcao === 'dir' ? 1 : -1));
       }, 520);
     }
+
+    // "Pula" direto pra uma página específica (usado pelos números da
+    // paginação) — sem o efeito de virar página uma por uma, porque não
+    // faria sentido animar 40 páginas de uma vez só quando a pessoa quer
+    // ir direto da página 2 pra página 47, por exemplo.
+    irParaPagina(indexAlvo) {
+      if (this.animando || indexAlvo === this.atual || indexAlvo < 0 || indexAlvo >= this.total) return;
+      const atualEl = this.montadas.get(this.atual);
+      const novaEl = this._garantirMontada(indexAlvo);
+
+      if (atualEl) {
+        atualEl.classList.remove('st-ativa', 'st-saindo-esq', 'st-saindo-dir');
+      }
+      novaEl.classList.add('st-instant');
+      novaEl.classList.add('st-ativa');
+      void novaEl.offsetWidth;
+      novaEl.classList.remove('st-instant');
+
+      this.atual = indexAlvo;
+      atualizarContador(this);
+      this._podarForaDaJanela();
+      this._garantirMontada(indexAlvo + 1);
+    }
   }
 
   let livroFlip = null;
@@ -474,10 +499,75 @@
   function atualizarContador(flip) {
     if (!flip) return;
     el.contador.textContent = `Página ${flip.atual + 1} de ${flip.total}`;
+    renderizarPaginacao(flip);
+  }
+
+  // Monta a lista de números clicáveis (tipo "1 2 3 ... 47 48 49 ... 99
+  // Próximo"), igual a paginação de qualquer site de vendas — assim dá
+  // pra pular direto pra uma página específica, sem precisar clicar em
+  // "próxima" um monte de vezes. Sempre mostra a primeira e a última
+  // página, mais uma "janela" de páginas perto de onde a pessoa está,
+  // com "…" no meio quando tem um pulo grande.
+  function construirListaPaginacao(atual, total) {
+    const RAIO = 2; // quantas páginas mostrar de cada lado da atual
+    const manter = new Set([0, total - 1]);
+    for (let i = atual - RAIO; i <= atual + RAIO; i++) {
+      if (i >= 0 && i < total) manter.add(i);
+    }
+    const indices = Array.from(manter).sort((a, b) => a - b);
+
+    const itens = [];
+    let anterior = null;
+    indices.forEach((i) => {
+      if (anterior !== null && i - anterior > 1) itens.push({ tipo: 'reticencias' });
+      itens.push({ tipo: 'pagina', index: i });
+      anterior = i;
+    });
+    return itens;
+  }
+
+  function renderizarPaginacao(flip) {
+    if (!el.paginacao) return;
+    if (!flip || flip.total <= 1) {
+      el.paginacao.hidden = true;
+      el.paginacao.innerHTML = '';
+      return;
+    }
+    el.paginacao.hidden = false;
+    const itens = construirListaPaginacao(flip.atual, flip.total);
+
+    const botoesNumeros = itens.map((item) => {
+      if (item.tipo === 'reticencias') return '<span class="paginacao-reticencias">…</span>';
+      const ativo = item.index === flip.atual;
+      return `<button type="button" class="paginacao-num${ativo ? ' paginacao-ativa' : ''}" data-pagina="${item.index}" ${ativo ? 'aria-current="page"' : ''}>${item.index + 1}</button>`;
+    }).join('');
+
+    const temAnterior = flip.atual > 0;
+    const temProximo = flip.atual < flip.total - 1;
+    const linkAnterior = temAnterior ? '<button type="button" class="paginacao-link" data-acao="anterior">‹ Anterior</button>' : '';
+    const linkProximo = temProximo ? '<button type="button" class="paginacao-link" data-acao="proximo">Próximo ›</button>' : '';
+
+    el.paginacao.innerHTML = `${linkAnterior}${botoesNumeros}${linkProximo}`;
   }
 
   el.btnAnterior.addEventListener('click', () => livroFlip && livroFlip.anterior());
   el.btnProximo.addEventListener('click', () => livroFlip && livroFlip.proxima());
+
+  if (el.paginacao) {
+    el.paginacao.addEventListener('click', (e) => {
+      if (!livroFlip) return;
+      const botaoNum = e.target.closest('.paginacao-num');
+      if (botaoNum) {
+        livroFlip.irParaPagina(Number(botaoNum.dataset.pagina));
+        return;
+      }
+      const acao = e.target.closest('.paginacao-link');
+      if (acao) {
+        if (acao.dataset.acao === 'anterior') livroFlip.anterior();
+        else if (acao.dataset.acao === 'proximo') livroFlip.proxima();
+      }
+    });
+  }
 
   // Passar o dedo pra virar a página (celular/tablet) — compara o quanto
   // o dedo andou na horizontal vs. na vertical, pra só disparar a virada

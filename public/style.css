@@ -435,6 +435,54 @@ main {
   font-weight: 600;
 }
 
+/* números de página clicáveis (tipo "1 2 3 … 47 48 49 … 99 Próximo"),
+   pra dar pra pular direto pra uma página específica do catálogo */
+.paginacao {
+  flex: 0 0 auto;
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.paginacao-num {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.paginacao-num:hover { background: #eef3f5; }
+.paginacao-ativa {
+  border-color: var(--primary);
+  color: #fff;
+  background: var(--primary);
+}
+.paginacao-ativa:hover { background: var(--primary); }
+.paginacao-reticencias {
+  color: var(--muted);
+  padding: 0 2px;
+  font-weight: 700;
+  user-select: none;
+}
+.paginacao-link {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 6px;
+}
+.paginacao-link:hover { text-decoration: underline; }
+
 /* páginas dentro do flipbook — cada uma ocupa o container inteiro,
    empilhadas, e a troca é animada com um giro 3D (efeito de virar página) */
 .pagina-livro {
