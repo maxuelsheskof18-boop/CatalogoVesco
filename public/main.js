@@ -186,27 +186,50 @@
   // faz sentido mostrar a capa do catálogo primeiro (quem buscou já quer
   // ver o resultado direto) — a revista já abre direto na primeira página
   // com produto.
-  function montarPaginasHTML(produtos, incluirCapa) {
+  // Antes essa função já criava o HTML (com fotos e tudo) de TODAS as
+  // páginas do catálogo de uma vez — com quase 800 produtos, isso é quase
+  // mil fotos carregando ao mesmo tempo, o que travava o navegador
+  // (por isso a seta de "próxima página" parecia não funcionar: o
+  // navegador estava ocupado demais carregando fotos de páginas que
+  // ninguém tinha nem chegado perto de ver ainda). Agora ela só monta uma
+  // lista leve de "o que cada página vai ter" (sem criar nenhum elemento
+  // nem carregar nenhuma foto) — quem realmente cria o HTML de uma
+  // página, sob demanda, é o LivroFlip (ver mais abaixo).
+  function montarPaginasDados(produtos, incluirCapa) {
     const paginasProdutos = [];
     for (let i = 0; i < produtos.length; i += ITEMS_PER_PAGE) {
       paginasProdutos.push(produtos.slice(i, i + ITEMS_PER_PAGE));
     }
 
     const paginas = [];
-    if (incluirCapa) paginas.push(paginaCapa());
+    if (incluirCapa) paginas.push({ tipo: 'capa' });
 
     const numeroInicial = incluirCapa ? 2 : 1;
     let contadorDestaque = 0;
     paginasProdutos.forEach((itens, idx) => {
-      paginas.push(paginaProdutos(itens, numeroInicial + idx));
+      paginas.push({ tipo: 'produtos', itens, numero: numeroInicial + idx });
       if ((idx + 1) % BANNER_EVERY_PAGES === 0 && idx !== paginasProdutos.length - 1) {
-        paginas.push(paginaBanner(contadorDestaque));
+        paginas.push({ tipo: 'banner', indice: contadorDestaque });
         contadorDestaque += 1;
       }
     });
 
-    paginas.push(paginaContracapa());
+    paginas.push({ tipo: 'contracapa' });
     return paginas;
+  }
+
+  // Constrói o HTML de UMA página só (com fotos), a partir do descritor
+  // leve montado acima — é aqui que o "custo" de cada página realmente
+  // acontece, e só é pago quando a página entra na janela visível (ver
+  // LivroFlip._garantirMontada).
+  function construirPaginaDOM(dados) {
+    switch (dados.tipo) {
+      case 'capa': return paginaCapa();
+      case 'contracapa': return paginaContracapa();
+      case 'banner': return paginaBanner(dados.indice);
+      case 'produtos': return paginaProdutos(dados.itens, dados.numero);
+      default: return paginaContracapa();
+    }
   }
 
   function paginaCapa() {
@@ -332,19 +355,55 @@
   // de nenhuma biblioteca externa/CDN — só o navegador do usuário).
   // ---------------------------------------------------------------
   class LivroFlip {
-    constructor(container, paginasEl) {
+    constructor(container, dadosPaginas) {
       this.container = container;
-      this.paginas = paginasEl;
+      this.dados = dadosPaginas;
       this.atual = 0;
       this.animando = false;
+      // index (número da página) -> elemento HTML já construído. Só as
+      // páginas "por perto" da atual ficam aqui — é isso que evita
+      // carregar as fotos do catálogo inteiro de uma vez (ver comentário
+      // em montarPaginasDados, acima).
+      this.montadas = new Map();
 
       this.container.innerHTML = '';
-      this.paginas.forEach((p) => this.container.appendChild(p));
-      this.paginas[0].classList.add('st-instant', 'st-ativa');
-      requestAnimationFrame(() => this.paginas[0].classList.remove('st-instant'));
+      const primeira = this._garantirMontada(0);
+      primeira.classList.add('st-instant', 'st-ativa');
+      requestAnimationFrame(() => primeira.classList.remove('st-instant'));
+      // já deixa a segunda página pronta em segundo plano, pra primeira
+      // vez que a pessoa clicar em "próxima" ser instantâneo também.
+      this._garantirMontada(1);
     }
 
-    get total() { return this.paginas.length; }
+    get total() { return this.dados.length; }
+
+    // Cria (se ainda não existir) o HTML de uma página específica e a
+    // deixa no DOM, pronta pra aparecer. Chamado sob demanda: só quando
+    // uma página realmente vai ser exibida (a atual ou uma vizinha).
+    _garantirMontada(index) {
+      if (index < 0 || index >= this.dados.length) return null;
+      let elemento = this.montadas.get(index);
+      if (!elemento) {
+        elemento = construirPaginaDOM(this.dados[index]);
+        this.container.appendChild(elemento);
+        this.montadas.set(index, elemento);
+      }
+      return elemento;
+    }
+
+    // Remove do DOM (e da memória) as páginas que não estão mais perto da
+    // atual — sem isso, depois de folhear o catálogo inteiro, todas as
+    // quase 100 páginas (com suas fotos) ficariam acumuladas no HTML de
+    // novo, do mesmo jeito que travava antes.
+    _podarForaDaJanela() {
+      const manter = new Set([this.atual - 1, this.atual, this.atual + 1]);
+      for (const [index, elemento] of this.montadas) {
+        if (!manter.has(index)) {
+          elemento.remove();
+          this.montadas.delete(index);
+        }
+      }
+    }
 
     proxima() {
       if (this.animando || this.atual >= this.total - 1) return;
@@ -358,8 +417,8 @@
 
     _transicao(novoIndex, direcao) {
       this.animando = true;
-      const atualEl = this.paginas[this.atual];
-      const novaEl = this.paginas[novoIndex];
+      const atualEl = this.montadas.get(this.atual);
+      const novaEl = this._garantirMontada(novoIndex);
 
       const classeSaida = direcao === 'dir' ? 'st-saindo-esq' : 'st-saindo-dir';
       const classeEntradaInicial = direcao === 'dir' ? 'st-entrando-dir' : 'st-entrando-esq';
@@ -384,6 +443,10 @@
       setTimeout(() => {
         atualEl.classList.remove(classeSaida);
         this.animando = false;
+        this._podarForaDaJanela();
+        // já deixa a próxima vizinha (na direção que a pessoa está indo)
+        // pronta em segundo plano, pra navegação seguida ficar fluida.
+        this._garantirMontada(novoIndex + (direcao === 'dir' ? 1 : -1));
       }, 520);
     }
   }
@@ -391,7 +454,7 @@
   let livroFlip = null;
 
   // true quando busca/categoria/marca está filtrando o catálogo — nesse
-  // caso a capa não aparece (ver montarPaginasHTML). "Ordenar" não conta
+  // caso a capa não aparece (ver montarPaginasDados). "Ordenar" não conta
   // como filtro aqui porque ele não reduz a lista, só muda a ordem.
   function temFiltroAtivo() {
     return !!(el.busca.value.trim() || el.categoria.value || (el.marca && el.marca.value));
@@ -403,7 +466,7 @@
     el.contador.hidden = false;
     ajustarAlturaLivro();
 
-    const paginas = montarPaginasHTML(lista, !temFiltroAtivo());
+    const paginas = montarPaginasDados(lista, !temFiltroAtivo());
     livroFlip = new LivroFlip(el.livro, paginas);
     atualizarContador(livroFlip);
   }
@@ -510,6 +573,25 @@
     renderizarCarrinho();
   }
 
+  // Define a quantidade digitada direto no campo (em vez de só somar/
+  // subtrair de um em um nos botões "+"/"−") — usada quando a pessoa quer
+  // pedir uma quantidade maior de uma vez, sem precisar clicar várias
+  // vezes. Sempre um número inteiro entre 1 e 9999 (mesmo limite que o
+  // servidor já aplica na hora de gerar o PDF do orçamento); qualquer
+  // valor inválido ou vazio simplesmente volta pra quantidade anterior.
+  function definirQuantidadeCarrinho(codigo, valorDigitado) {
+    if (!carrinho[codigo]) return;
+    const numero = Math.floor(Number(valorDigitado));
+    if (!Number.isFinite(numero) || numero < 1) {
+      renderizarCarrinho(); // desfaz visualmente, voltando pro valor salvo
+      return;
+    }
+    carrinho[codigo] = Math.min(numero, 9999);
+    salvarCarrinho();
+    atualizarContadorCarrinho();
+    renderizarCarrinho();
+  }
+
   function removerDoCarrinho(codigo) {
     delete carrinho[codigo];
     salvarCarrinho();
@@ -538,7 +620,16 @@
           <div class="carrinho-item-controles">
             <span class="carrinho-item-qtd">
               <button type="button" class="carrinho-diminuir" aria-label="Diminuir quantidade">−</button>
-              <span>${it.quantidade}</span>
+              <input
+                type="number"
+                class="carrinho-item-input"
+                inputmode="numeric"
+                min="1"
+                max="9999"
+                step="1"
+                value="${it.quantidade}"
+                aria-label="Quantidade"
+              />
               <button type="button" class="carrinho-aumentar" aria-label="Aumentar quantidade">+</button>
             </span>
             <button type="button" class="carrinho-item-remover">remover</button>
@@ -576,6 +667,7 @@
       return `• ${it.quantidade}x ${it.produto.produto}${sku} — ${preco}`;
     });
     return (
+      '📋 *Pedido feito pelo Catálogo Vesco* (catalogo.vesco.com.br)\n\n' +
       'Olá! Gostaria de fazer um orçamento com os seguintes produtos:\n\n' +
       linhas.join('\n') +
       `\n\nTotal: ${formatarPreco(total)}`
@@ -655,6 +747,23 @@
     if (e.target.closest('.carrinho-aumentar')) alterarQuantidadeCarrinho(codigo, 1);
     else if (e.target.closest('.carrinho-diminuir')) alterarQuantidadeCarrinho(codigo, -1);
     else if (e.target.closest('.carrinho-item-remover')) removerDoCarrinho(codigo);
+  });
+  // Confirma o número digitado direto no campo de quantidade quando a
+  // pessoa sai do campo (clica em outro lugar) ou aperta Enter — não a
+  // cada tecla digitada, pra não "atrapalhar" enquanto ela ainda está
+  // digitando (ex.: apagar o "1" pra escrever "12" não pode disparar uma
+  // atualização no meio do caminho, com um valor "0" temporário).
+  el.carrinhoLista.addEventListener('change', (e) => {
+    const campo = e.target.closest('.carrinho-item-input');
+    if (!campo) return;
+    const item = campo.closest('.carrinho-item');
+    if (item) definirQuantidadeCarrinho(item.dataset.codigo, campo.value);
+  });
+  el.carrinhoLista.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.closest('.carrinho-item-input')) {
+      e.preventDefault();
+      e.target.blur(); // dispara o "change" acima
+    }
   });
   el.btnCarrinhoWhatsapp.addEventListener('click', () => {
     const itens = itensCarrinhoDetalhados();
