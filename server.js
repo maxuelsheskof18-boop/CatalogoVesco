@@ -332,6 +332,7 @@ app.get('/debug-chrome', async (req, res) => {
     execPathNode: process.execPath,
     npxCalculado: caminhoDoNpx(),
     npxCalculadoExiste: fsSync.existsSync(caminhoDoNpx()),
+    cliPuppeteerCalculado: caminhoCliPuppeteer(),
     executablePathEsperado,
     chromeJaInstaladoAntes: chromeJaInstalado()
   };
@@ -716,6 +717,31 @@ function caminhoDoNpx() {
   return fsSync.existsSync(candidato) ? candidato : 'npx';
 }
 
+// A causa REAL do problema na Hostinger (confirmada via /debug-chrome):
+// "Permission denied" ao tentar rodar o atalho node_modules/.bin/puppeteer
+// — o upload de arquivos da Hostinger não preserva a permissão de
+// "executável" desse arquivinho (comum em hospedagens que sincronizam
+// arquivos por FTP/painel em vez de git puro). O "npx puppeteer ..." por
+// baixo dos panos tenta executar exatamente esse atalho, por isso falhava
+// mesmo com o npx encontrado certinho. A saída: rodar o script de verdade
+// do puppeteer diretamente com "node arquivo.js" (só precisa de permissão
+// de LEITURA, que esses arquivos sempre têm) em vez de tentar EXECUTAR o
+// atalho. Descobrimos o caminho desse script pelo próprio "bin" declarado
+// no package.json do puppeteer, então continua funcionando mesmo se essa
+// estrutura interna mudar de versão pra versão.
+function caminhoCliPuppeteer() {
+  try {
+    const pkgPath = require.resolve('puppeteer/package.json');
+    const pkg = require(pkgPath);
+    const binRelativo = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin && pkg.bin.puppeteer;
+    if (!binRelativo) return null;
+    const caminho = path.join(path.dirname(pkgPath), binRelativo);
+    return fsSync.existsSync(caminho) ? caminho : null;
+  } catch {
+    return null;
+  }
+}
+
 // Guarda o erro mais recente da instalação automática (se der errado) —
 // além de ir pro log do servidor, a rota /debug-chrome devolve esse texto
 // direto na resposta, porque em hospedagens sem acesso fácil aos logs de
@@ -730,11 +756,25 @@ function garantirChromeInstalado() {
     promessaChromeInstalado = (async () => {
       try {
         console.log('Chrome do Puppeteer não encontrado — baixando automaticamente (pode levar 1 minuto)...');
-        await execFileAsync(caminhoDoNpx(), ['puppeteer', 'browsers', 'install', 'chrome'], {
-          cwd: __dirname,
-          maxBuffer: 1024 * 1024 * 20,
-          timeout: 120000
-        });
+        const cliPuppeteer = caminhoCliPuppeteer();
+        if (cliPuppeteer) {
+          // Caminho preferido: roda o script do puppeteer direto com "node",
+          // sem depender de permissão de EXECUÇÃO em nenhum atalho — é o que
+          // contorna o "Permission denied" visto na Hostinger.
+          await execFileAsync(process.execPath, [cliPuppeteer, 'browsers', 'install', 'chrome'], {
+            cwd: __dirname,
+            maxBuffer: 1024 * 1024 * 20,
+            timeout: 120000
+          });
+        } else {
+          // Não achamos o script do puppeteer (estrutura de pastas
+          // inesperada) — cai pro jeito antigo via "npx" como último recurso.
+          await execFileAsync(caminhoDoNpx(), ['puppeteer', 'browsers', 'install', 'chrome'], {
+            cwd: __dirname,
+            maxBuffer: 1024 * 1024 * 20,
+            timeout: 120000
+          });
+        }
         console.log('Chrome baixado com sucesso.');
         ultimoErroInstalacaoChrome = null;
       } catch (erro) {
