@@ -120,6 +120,7 @@ const app = express();
 // errada mesmo com o site publicado em HTTPS.
 app.set('trust proxy', true);
 app.use(cors());
+app.use(express.json({ limit: '256kb' })); // usado só pelo /gerar-pdf-carrinho (POST com a lista de itens)
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------------------------------------------------------------
@@ -265,6 +266,14 @@ function formatarPreco(v) {
   const num = Number(String(v).replace(',', '.').replace(/[^\d.-]/g, ''));
   if (Number.isNaN(num)) return `R$ ${v}`;
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+// Mesma lógica do "precoNumerico" do main.js (preço 0/vazio/inválido vira
+// "null", pra tratar como "Consulte" em vez de contar como R$0 na soma do
+// carrinho) — reimplementada aqui porque o servidor não carrega main.js.
+function precoNumericoServidor(venda) {
+  const num = Number(String(venda || '').replace(',', '.').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(num) && num > 0 ? num : null;
 }
 
 function escapeHtml(str) {
@@ -444,6 +453,141 @@ ${capa}
 ${paginasHtml}
 </body>
 </html>`;
+}
+
+// Monta o HTML do PDF do CARRINHO — diferente do catálogo normal (grade
+// de fotos), aqui é uma lista/tabela com quantidade e subtotal de cada
+// item, e um total geral no final, do jeito que um orçamento de verdade
+// costuma ser. Reaproveita as mesmas cores/fontes do catálogo pra manter
+// a identidade visual, mas o layout em si é próprio.
+const ITENS_CARRINHO_POR_PAGINA = 14;
+
+function gerarHTMLCarrinho(itens) {
+  const dataGeracao = new Date().toLocaleDateString('pt-BR');
+  const total = itens.reduce((soma, it) => soma + (it.subtotal || 0), 0);
+  const temItemSemPreco = itens.some((it) => it.subtotal === null);
+
+  const paginasItens = [];
+  for (let i = 0; i < itens.length; i += ITENS_CARRINHO_POR_PAGINA) {
+    paginasItens.push(itens.slice(i, i + ITENS_CARRINHO_POR_PAGINA));
+  }
+  if (paginasItens.length === 0) paginasItens.push([]);
+
+  const paginasHtml = paginasItens
+    .map((pagina, idx) => {
+      const ehUltima = idx === paginasItens.length - 1;
+      const linhas = pagina
+        .map(
+          (it) => `
+        <tr>
+          <td class="col-produto">
+            <div class="linha-produto">
+              <img src="${it.produto.imagem || SEM_IMAGEM_DATA_URL}" onerror="this.onerror=null;this.src='${SEM_IMAGEM_DATA_URL}';"/>
+              <div>
+                <div class="linha-nome">${escapeHtml(it.produto.produto)}</div>
+                <div class="linha-cod">Cód: ${escapeHtml(it.produto.codigo || '—')} · ${escapeHtml(it.produto.marca || 'Vesco')}</div>
+              </div>
+            </div>
+          </td>
+          <td class="col-preco">${formatarPreco(it.produto.venda)}</td>
+          <td class="col-qtd">${it.quantidade}</td>
+          <td class="col-subtotal">${it.subtotal === null ? 'Consulte' : formatarPreco(it.subtotal)}</td>
+        </tr>`
+        )
+        .join('');
+
+      return `
+      <section class="pagina">
+        <header class="cabecalho">
+          <div class="cabecalho-marca">VESCO — ORÇAMENTO</div>
+          <div class="cabecalho-pagina">${idx + 1}/${paginasItens.length}</div>
+        </header>
+        <table class="tabela-carrinho">
+          <thead>
+            <tr><th class="col-produto">Produto</th><th class="col-preco">Preço unit.</th><th class="col-qtd">Qtd.</th><th class="col-subtotal">Subtotal</th></tr>
+          </thead>
+          <tbody>${linhas}</tbody>
+        </table>
+        ${ehUltima ? `
+        <div class="total-geral">
+          <span>Total geral</span>
+          <strong>${formatarPreco(total)}</strong>
+        </div>
+        ${temItemSemPreco ? '<p class="aviso-consulte">* itens marcados "Consulte" não entram na soma do total — fale com a gente pelo WhatsApp pra confirmar o preço.</p>' : ''}
+        ` : ''}
+        <footer class="rodape">Catálogo Vesco — Soluções em Higiene e Limpeza · Orçamento gerado em ${dataGeracao}</footer>
+      </section>`;
+    })
+    .join('');
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<title>Orçamento Vesco</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; font-family: 'Segoe UI', Arial, sans-serif; color:#0f2a3d; }
+  .pagina { width: 210mm; height: 297mm; padding: 14mm; page-break-after: always; display:flex; flex-direction:column; }
+  .cabecalho { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #00334d; padding-bottom:8px; margin-bottom:16px; }
+  .cabecalho-marca { font-weight:800; letter-spacing:2px; color:#00334d; font-size:14px; }
+  .cabecalho-pagina { font-weight:700; color:#00a859; font-size:13px; }
+  .tabela-carrinho { width:100%; border-collapse: collapse; }
+  .tabela-carrinho th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:#6b7c85; padding:6px 8px; border-bottom:2px solid #e6ecf0; }
+  .tabela-carrinho td { padding:8px; border-bottom:1px solid #eef1f2; vertical-align:middle; font-size:12px; }
+  .col-preco, .col-qtd, .col-subtotal { text-align:right; white-space:nowrap; }
+  .col-qtd { text-align:center; }
+  .col-subtotal { font-weight:800; color:#00753d; }
+  .linha-produto { display:flex; align-items:center; gap:10px; }
+  .linha-produto img { width:40px; height:40px; object-fit:contain; border-radius:6px; background:#f8fafb; border:1px solid #e6ecf0; flex:0 0 auto; }
+  .linha-nome { font-weight:700; font-size:12px; }
+  .linha-cod { font-size:9.5px; color:#6b7c85; margin-top:2px; }
+  .total-geral { margin-top:18px; padding-top:14px; border-top:2px solid #00334d; display:flex; justify-content:space-between; align-items:baseline; }
+  .total-geral span { font-size:14px; font-weight:700; }
+  .total-geral strong { font-size:22px; color:#00334d; }
+  .aviso-consulte { font-size:10px; color:#6b7c85; margin-top:8px; }
+  .rodape { margin-top:auto; text-align:center; font-size:9px; color:#8fa1a8; padding-top:8px; border-top:1px solid #eef1f2; }
+</style>
+</head>
+<body>
+${paginasHtml}
+</body>
+</html>`;
+}
+
+// Recebe {codigo, quantidade} vindos do carrinho do navegador, confere
+// cada produto direto na planilha (nunca confia no nome/preço que o
+// navegador mandou — só no código) e gera o PDF do orçamento.
+async function gerarPdfCarrinho(itensCarrinho) {
+  const todos = await buscarProdutos();
+  const porCodigo = new Map(todos.map((p) => [String(p.codigo), p]));
+
+  const itens = itensCarrinho
+    .map((it) => {
+      const produto = porCodigo.get(String(it && it.codigo));
+      if (!produto) return null;
+      const quantidade = Math.max(1, Math.min(9999, Math.round(Number(it.quantidade) || 1)));
+      const precoUnit = precoNumericoServidor(produto.venda);
+      const subtotal = precoUnit === null ? null : precoUnit * quantidade;
+      return { produto, quantidade, subtotal };
+    })
+    .filter(Boolean);
+
+  if (itens.length === 0) {
+    throw new Error('Nenhum dos produtos do carrinho foi encontrado no catálogo atual.');
+  }
+
+  const html = gerarHTMLCarrinho(itens);
+  await fs.mkdir(TMP_DIR, { recursive: true });
+  const nomeArquivo = `carrinho-${crypto.randomBytes(8).toString('hex')}.pdf`;
+  const caminho = path.join(TMP_DIR, nomeArquivo);
+  try {
+    await renderizarLoteParaArquivo(html, caminho);
+    return await fs.readFile(caminho);
+  } finally {
+    fs.unlink(caminho).catch(() => {});
+  }
 }
 
 async function filtrarProdutos(req) {
@@ -739,6 +883,31 @@ app.get('/gerar-pdf', async (req, res) => {
 });
 
 // ---------------------------------------------------------------
+// PDF do carrinho de orçamento (botão "Gerar PDF do carrinho" no site) —
+// recebe a lista de produtos+quantidade que a pessoa montou no carrinho
+// e devolve um PDF só com esses itens, quantidade e subtotal de cada um.
+// ---------------------------------------------------------------
+app.post('/gerar-pdf-carrinho', async (req, res) => {
+  try {
+    const itens = Array.isArray(req.body && req.body.itens) ? req.body.itens : [];
+    if (itens.length === 0) {
+      return res.status(400).send('Carrinho vazio.');
+    }
+    if (itens.length > 300) {
+      return res.status(413).send('Carrinho com produtos demais pra gerar de uma vez.');
+    }
+
+    const pdfBuffer = await gerarPdfCarrinho(itens);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="orcamento-vesco.pdf"');
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('Erro /gerar-pdf-carrinho:', err);
+    res.status(500).send('Erro ao gerar o PDF do carrinho: ' + err.message);
+  }
+});
+
+// ---------------------------------------------------------------
 // Gera o PDF e manda pro Heyzine, que devolve um link de catálogo em
 // formato "revista digital" (efeito de página realista, pronto pra
 // compartilhar) — é o que o botão "Ver como revista online" usa.
@@ -908,4 +1077,13 @@ app.listen(PORT, () => {
 });
 
 // exportado só para possibilitar testes automatizados do template do PDF
-module.exports = { gerarHTML, montarPaginas, formatarPreco, escapeHtml, normalizarProduto };
+module.exports = {
+  gerarHTML,
+  gerarHTMLCarrinho,
+  gerarPdfCarrinho,
+  montarPaginas,
+  formatarPreco,
+  escapeHtml,
+  normalizarProduto,
+  precoNumericoServidor
+};

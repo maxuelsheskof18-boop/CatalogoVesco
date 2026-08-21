@@ -188,6 +188,36 @@ só em `localhost` no seu computador, o Heyzine não consegue alcançar o
 arquivo e a geração falha — isso é esperado, não é erro. Depois de publicado
 no Render (ou onde for), funciona normalmente.
 
+## Carrinho de orçamento
+
+Cada produto tem um botãozinho "+" no canto do card — clicar adiciona ele
+ao carrinho (o número no botão "🛒 Carrinho", no topo do site, mostra
+quantos itens tem). Clicando em "Carrinho" abre um painel onde dá pra
+aumentar/diminuir a quantidade de cada item, remover, ver o total, e
+então:
+
+- **Enviar no WhatsApp**: abre o WhatsApp (Web ou app, dependendo do
+  aparelho) já com uma mensagem pronta, listando os produtos, quantidades
+  e o total, pronta pra enviar pro número configurado no site.
+- **Gerar PDF do carrinho**: baixa um PDF só com os itens do carrinho —
+  nome, código, preço unitário, quantidade, subtotal de cada um e o total
+  geral no final (bom pra mandar por e-mail ou imprimir).
+
+O carrinho fica salvo no navegador de quem está usando (não é
+compartilhado entre o site e o WhatsApp da Vesco, nem entre aparelhos
+diferentes) — se a pessoa fechar e voltar no mesmo navegador, o carrinho
+continua lá; se limpar os dados do navegador, ele reseta.
+
+**Pra trocar o número de WhatsApp que recebe os pedidos**, edite a linha
+`const WHATSAPP_NUMERO = '5511989433272';` perto do topo do arquivo
+`public/main.js` — o formato é o número completo com código do país (55)
+e DDD, só dígitos, sem espaço, traço ou "+".
+
+Os preços do PDF do carrinho vêm sempre direto da planilha na hora de
+gerar (o servidor confere cada produto pelo código, nunca confia no preço
+que o navegador mandou) — então mesmo que a pessoa deixe o carrinho
+"esquecido" por um tempo, o PDF sai sempre com o preço atualizado.
+
 ## Pré-aquecimento automático (deixa os dois botões mais rápidos)
 
 Assim que o servidor sobe, e depois a cada ~100 minutos, ele gera sozinho o
