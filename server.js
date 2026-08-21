@@ -85,38 +85,80 @@ function ehErroDeChromeIndisponivel(erro) {
 // quando o Chrome LOCAL falhou por indisponibilidade (ver acima) — nunca
 // como caminho padrão, já que gerar localmente é sempre mais rápido.
 async function encaminharGeracaoParaRender(caminho, req, res, { metodo = 'GET', corpo = null } = {}) {
+  // Trava de segurança: se esse próprio servidor JÁ FOR o Render (o mesmo
+  // endereço configurado em RENDER_FALLBACK_URL), nunca encaminha pra si
+  // mesmo — sem essa checagem, um erro de Chrome no Render (raro, mas pode
+  // acontecer por falta de memória no plano gratuito) faria o Render tentar
+  // chamar a si próprio, empilhando requisições e piorando a falta de
+  // memória em vez de resolver.
+  const hostAtual = (req.get('host') || '').toLowerCase();
+  const hostRender = RENDER_FALLBACK_URL.replace(/^https?:\/\//, '').toLowerCase();
+  if (hostAtual && hostRender && hostAtual === hostRender) {
+    throw new Error('Chrome indisponível e este já é o servidor de apoio — não há mais nenhum outro pra tentar.');
+  }
+
   const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
   const urlDestino = `${RENDER_FALLBACK_URL}${caminho}${qs}`;
   console.warn(`Chrome indisponível neste servidor — encaminhando geração pro Render: ${urlDestino}`);
 
-  const respostaRender = await fetch(urlDestino, {
-    method: metodo,
-    redirect: 'manual',
-    headers: corpo ? { 'Content-Type': 'application/json' } : undefined,
-    body: corpo ? JSON.stringify(corpo) : undefined
-  });
+  async function tentarUmaVez() {
+    const respostaRender = await fetch(urlDestino, {
+      method: metodo,
+      redirect: 'manual',
+      headers: corpo ? { 'Content-Type': 'application/json' } : undefined,
+      body: corpo ? JSON.stringify(corpo) : undefined
+    });
 
-  // A rota de revista digital redireciona (302) pro link do Heyzine — nesse
-  // caso, repassa o mesmo redirecionamento pro visitante, sem baixar nada
-  // aqui no meio (é só um link).
-  if (respostaRender.status >= 300 && respostaRender.status < 400 && respostaRender.headers.get('location')) {
-    return res.redirect(respostaRender.headers.get('location'));
+    // A rota de revista digital redireciona (302) pro link do Heyzine —
+    // nesse caso, repassa o mesmo redirecionamento pro visitante, sem
+    // baixar nada aqui no meio (é só um link).
+    if (respostaRender.status >= 300 && respostaRender.status < 400 && respostaRender.headers.get('location')) {
+      return { redirecionarPara: respostaRender.headers.get('location') };
+    }
+
+    if (!respostaRender.ok) {
+      const textoErro = await respostaRender.text().catch(() => '');
+      const erro = new Error(
+        `O servidor de apoio (Render) também não conseguiu gerar (status ${respostaRender.status}): ` +
+        textoErro.slice(0, 500)
+      );
+      erro.status = respostaRender.status;
+      throw erro;
+    }
+
+    const buffer = Buffer.from(await respostaRender.arrayBuffer());
+    return {
+      buffer,
+      tipo: respostaRender.headers.get('content-type'),
+      disposicao: respostaRender.headers.get('content-disposition')
+    };
   }
 
-  if (!respostaRender.ok) {
-    const textoErro = await respostaRender.text().catch(() => '');
-    throw new Error(
-      `O servidor de apoio (Render) também não conseguiu gerar (status ${respostaRender.status}): ` +
-      textoErro.slice(0, 500)
-    );
+  let resultado;
+  try {
+    resultado = await tentarUmaVez();
+  } catch (erro) {
+    // O plano gratuito do Render "dorme" depois de 15 min sem visitas e o
+    // catálogo completo (centenas de produtos) usa bastante memória nos
+    // 512 MB desse plano — as duas coisas às vezes causam um "502" só na
+    // PRIMEIRA tentativa (o servidor ainda ligando, ou terminando de
+    // liberar memória de uma geração anterior). Por isso tenta mais uma
+    // vez, depois de uma pausa curta, antes de desistir de vez.
+    if (erro.status === 502 || erro.status === 503 || erro.status === 504) {
+      console.warn('Render respondeu com erro temporário, tentando de novo em 4s...');
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      resultado = await tentarUmaVez();
+    } else {
+      throw erro;
+    }
   }
 
-  const buffer = Buffer.from(await respostaRender.arrayBuffer());
-  const tipo = respostaRender.headers.get('content-type');
-  const disposicao = respostaRender.headers.get('content-disposition');
-  if (tipo) res.setHeader('Content-Type', tipo);
-  if (disposicao) res.setHeader('Content-Disposition', disposicao);
-  res.send(buffer);
+  if (resultado.redirecionarPara) {
+    return res.redirect(resultado.redirecionarPara);
+  }
+  if (resultado.tipo) res.setHeader('Content-Type', resultado.tipo);
+  if (resultado.disposicao) res.setHeader('Content-Disposition', resultado.disposicao);
+  res.send(resultado.buffer);
 }
 
 const ITEMS_PER_PAGE = 10;
