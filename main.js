@@ -34,7 +34,7 @@
   // Número de WhatsApp que recebe os pedidos do carrinho (formato
   // internacional, só dígitos, sem "+"). Pra trocar, é só editar essa
   // linha — o mesmo número que já aparece na contracapa do PDF.
-  const WHATSAPP_NUMERO = '5511989433272';
+  const WHATSAPP_NUMERO = '5511127614730';
 
   let todosProdutos = [];
   let debounceTimer = null;
@@ -534,7 +534,7 @@
         <img src="${img}" alt="${nome}" onerror="this.src='/sem-imagem.svg'"/>
         <div class="carrinho-item-info">
           <div class="carrinho-item-nome">${nome}</div>
-          <div class="carrinho-item-preco">${formatarPreco(it.produto.venda)} cada</div>
+          <div class="carrinho-item-preco">SKU: ${codigo || '—'} · ${formatarPreco(it.produto.venda)} cada</div>
           <div class="carrinho-item-controles">
             <span class="carrinho-item-qtd">
               <button type="button" class="carrinho-diminuir" aria-label="Diminuir quantidade">−</button>
@@ -572,7 +572,8 @@
   function montarMensagemWhatsApp(itens, total) {
     const linhas = itens.map((it) => {
       const preco = it.subtotal === null ? 'consulte o preço' : formatarPreco(it.subtotal);
-      return `• ${it.quantidade}x ${it.produto.produto} — ${preco}`;
+      const sku = it.produto.codigo ? ` (SKU: ${it.produto.codigo})` : '';
+      return `• ${it.quantidade}x ${it.produto.produto}${sku} — ${preco}`;
     });
     return (
       'Olá! Gostaria de fazer um orçamento com os seguintes produtos:\n\n' +
